@@ -3,7 +3,7 @@ require('dotenv').config();
 const mysql = require("mysql2/promise");
 
 console.log("🔍 DB ENV CHECK:", {
-  host: process.env.DB_HOST,
+  hostt: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD ? "✅ Loaded" : "❌ Missing",
   database: process.env.DB_NAME,
