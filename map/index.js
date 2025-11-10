@@ -38,7 +38,7 @@ app.use(express.json()); // parses application/json
 app.use(express.urlencoded({ extended: true })); // parses form-data
 
 app.get('/', (req, res) => {
-  res.send('Server is working ✅');
+  res.send('Server is working ✅om');
 });
 
 
