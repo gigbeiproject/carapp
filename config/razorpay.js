@@ -1,4 +1,3 @@
-// backend/config/razorpay.js
 const Razorpay = require("razorpay");
 const dotenv = require("dotenv");
 const path = require("path");
