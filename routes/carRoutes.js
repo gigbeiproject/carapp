@@ -25,7 +25,7 @@ router.post(
 router.get("/", getAllCars);       // GET all
 router.get("/:id",getCarById);       
 
-router.get("/user/:userId", getCarsByUserId);
+router.get("/userr/:userId", getCarsByUserId);
 
 
 router.put("/:id", protect, upload.fields([
