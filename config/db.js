@@ -1,9 +1,13 @@
 // backend/config/db.js
-require('dotenv').config();
+require("dotenv").config({
+  path: "/home/ubuntu/actions-runner-backend/_work/carapp/carapp/.env"
+});
+
+
 const mysql = require("mysql2/promise");
 
 console.log("🔍 DB ENV CHECK:", {
-  hostt: process.env.DB_HOST,
+  host1: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD ? "✅ Loaded" : "❌ Missing",
   database: process.env.DB_NAME,
