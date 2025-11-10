@@ -1,6 +1,5 @@
 // backend/config/db.js
-require("dotenv").config({ path: "../.env" }); // if .env is in parent folder
-
+require('dotenv').config();
 const mysql = require("mysql2/promise");
 
 console.log("🔍 DB ENV CHECK:", {
