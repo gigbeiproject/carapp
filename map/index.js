@@ -95,6 +95,11 @@ app.use("/chat", ChatRoute);
 
 app.use("/admin", UserRouteadmin);
 
+app.get("/", (req, res) => {
+  res.send("Backend is running!");
+});
+
+
 
 
 
