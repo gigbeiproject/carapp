@@ -99,6 +99,11 @@ app.get("/", (req, res) => {
   res.send("Backend is running!");
 });
 
+app.get("/test", (req, res) => {
+  res.json({ success: true, message: "Backend API is responding!" });
+});
+
+
 
 
 
