@@ -200,53 +200,80 @@ exports.updateUserPermStatus = async (req, res) => {
 
 
 // booking
-
-
 exports.getAllReservations = async (req, res) => {
   try {
-   const [reservations] = await db.execute(`
-  SELECT 
-    r.id,
-    r.userId,
-    u.name AS userName,
-    u.phoneNumber AS userPhone,
-    r.carId,
-    c.title AS carTitle,
-    c.city AS carCity,
-    r.startDate,
-    r.endDate,
-    r.bookingStartDateTime,
-    r.bookingEndDateTime,
-    r.amount,
-    r.totalHours,
-    r.userLocation,
-    r.userLat,
-    r.userLong,
-    r.doorstepAmount,
-    r.doorstepDistance,
-    r.couponCode,
-    r.customAddress,
-    r.status,
-    r.paymentId,
-    r.orderId,
-    r.settlementStatus,
-    r.hostId,
-    h.name AS hostName,
-    h.phoneNumber AS hostPhone,
-    r.createdAt,
-    r.updatedAt
-  FROM reservations r
-  LEFT JOIN users u ON CONVERT(r.userId USING utf8mb4) = CONVERT(u.id USING utf8mb4)
-  LEFT JOIN users h ON CONVERT(r.hostId USING utf8mb4) = CONVERT(h.id USING utf8mb4)
-  LEFT JOIN cars c ON CONVERT(r.carId USING utf8mb4) = CONVERT(c.id USING utf8mb4)
-  ORDER BY r.createdAt DESC
-`);
+    // 1️⃣ Fetch reservations with user, host, and car details
+    const [reservations] = await db.execute(`
+      SELECT 
+        r.id,
+        r.userId,
+        u.name AS userName,
+        u.phoneNumber AS userPhone,
+        r.carId,
+        c.title AS carTitle,
+        c.city AS carCity,
+        r.startDate,
+        r.endDate,
+        r.bookingStartDateTime,
+        r.bookingEndDateTime,
+        r.amount,
+        r.totalHours,
+        r.userLocation,
+        r.userLat,
+        r.userLong,
+        r.doorstepAmount,
+        r.doorstepDistance,
+        r.couponCode,
+        r.customAddress,
+        r.status,
+        r.paymentId,
+        r.orderId,
+        r.settlementStatus,
+        r.hostId,
+        h.name AS hostName,
+        h.phoneNumber AS hostPhone,
+        r.createdAt,
+        r.updatedAt
+      FROM reservations r
+      LEFT JOIN users u ON CONVERT(r.userId USING utf8mb4) = CONVERT(u.id USING utf8mb4)
+      LEFT JOIN users h ON CONVERT(r.hostId USING utf8mb4) = CONVERT(h.id USING utf8mb4)
+      LEFT JOIN cars c ON CONVERT(r.carId USING utf8mb4) = CONVERT(c.id USING utf8mb4)
+      ORDER BY r.createdAt DESC
+    `);
 
+    if (reservations.length === 0) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
 
+    // 2️⃣ Get reservation IDs
+    const reservationIds = reservations.map(r => `'${r.id}'`).join(",");
+
+    // 3️⃣ Fetch all photos for these reservations
+    const [photos] = await db.execute(`
+      SELECT * FROM reservation_photos
+      WHERE reservationId IN (${reservationIds})
+    `);
+
+    // 4️⃣ Map photos to reservations with separate arrays
+    const photosMap = {};
+    photos.forEach(p => {
+      if (!photosMap[p.reservationId]) photosMap[p.reservationId] = { pickup: [], drop: [] };
+      if (p.photoType === 'PICKUP') photosMap[p.reservationId].pickup.push({ photoUrl: p.photoUrl, createdAt: p.createdAt });
+      if (p.photoType === 'DROP') photosMap[p.reservationId].drop.push({ photoUrl: p.photoUrl, createdAt: p.createdAt });
+    });
+
+    // 5️⃣ Add pickup and drop arrays to each reservation
+    const reservationsWithPhotos = reservations.map(r => ({
+      ...r,
+      photosPickup: photosMap[r.id]?.pickup || [],
+      photosDrop: photosMap[r.id]?.drop || [],
+    }));
+
+    // ✅ Return
     res.json({
       success: true,
-      count: reservations.length,
-      data: reservations,
+      count: reservationsWithPhotos.length,
+      data: reservationsWithPhotos,
     });
   } catch (err) {
     console.error("Error fetching reservations:", err);
@@ -257,6 +284,8 @@ exports.getAllReservations = async (req, res) => {
     });
   }
 };
+
+
 
 
 
