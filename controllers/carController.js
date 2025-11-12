@@ -122,14 +122,15 @@ exports.createListing = async (req, res) => {
   }
 };
 
-
+// get all permit
 exports.getAllCars = async (req, res) => {
   try {
-    // Fetch all cars along with owner name and phoneNumber
+    // Fetch only APPROVED cars along with owner details
     const [cars] = await db.execute(
       `SELECT c.*, u.name AS HostName, u.phoneNumber AS ownerPhone
        FROM cars c
-       JOIN users u ON c.userId = u.id`
+       JOIN users u ON c.userId = u.id
+       WHERE c.carApprovalStatus = 'APPROVED'`
     );
 
     for (const car of cars) {
@@ -163,20 +164,30 @@ exports.getAllCars = async (req, res) => {
         [car.id]
       );
 
+      // Attach related data
       car.images = images.map((i) => i.imagePath);
       car.documents = documents;
       car.features = features.map((f) => f.feature);
-      car.avgRating = ratingResult[0].avgRating ? parseFloat(ratingResult[0].avgRating.toFixed(1)) : 0;
+      car.avgRating = ratingResult[0].avgRating
+        ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+        : 0;
       car.totalReviews = ratingResult[0].totalReviews;
-      car.bookingCount = bookingResult[0].bookingCount; // added booking count
+      car.bookingCount = bookingResult[0].bookingCount;
     }
 
     res.json({ success: true, data: cars });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Error fetching cars", error: err.message });
+    console.error("Error fetching cars:", err);
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Error fetching cars",
+        error: err.message,
+      });
   }
 };
+
 
 // get all product detiles page 
 

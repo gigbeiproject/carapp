@@ -1,7 +1,5 @@
 // backend/config/db.js
-require("dotenv").config({
-  path: "/home/ubuntu/actions-runner-backend/_work/carapp/carapp/.env"
-});
+require("dotenv").config({ path: "../.env" }); // if .env is in parent folder
 
 
 const mysql = require("mysql2/promise");
