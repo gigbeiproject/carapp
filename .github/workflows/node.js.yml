@@ -27,7 +27,10 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
-    
+    - run: |
+       touch .env
+       echo "${{secrets.PROD_ENV_FILE}}" > .env
+
     - name: Deploy to EC2
       run: |
         mkdir -p ~/.ssh
