@@ -188,17 +188,20 @@ const getUserBookings = async (req, res) => {
   }
 };
 
-const getBookingById = async (req, res) => {
+
+// *
+ const getBookingById = async (req, res) => {
   try {
     const { id } = req.params; // booking ID
     const userId = req.user.id; // from token middleware
 
-    // Fetch booking details + car + host + user info
+    // Fetch booking details + car + host + user info (now includes securityDeposit)
     const [rows] = await db.execute(
       `SELECT 
           r.*, 
           c.title AS carTitle, 
           c.pricePerHour, 
+          c.securityDeposit, 
           c.city, 
           c.fuelType, 
           c.transmissionType,
@@ -250,6 +253,9 @@ const getBookingById = async (req, res) => {
       : 0;
     booking.totalReviews = ratingResult[0].totalReviews;
 
+    // ✅ Include securityDeposit clearly in the response
+    booking.securityDeposit = booking.securityDeposit || 0;
+
     res.status(200).json({ success: true, booking });
   } catch (err) {
     console.error("getBookingById error:", err);
@@ -260,6 +266,7 @@ const getBookingById = async (req, res) => {
     });
   }
 };
+
 
 
 const cancelBooking = async (req, res) => {
