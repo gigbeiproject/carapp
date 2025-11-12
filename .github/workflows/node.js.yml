@@ -30,3 +30,15 @@ jobs:
     - run: |
        touch .env
        echo "${{secrets.PROD_ENV_FILE}}"
+    - name: Deploy to EC2
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh -o StrictHostKeyChecking=no ubuntu@ec2-13-60-43-80.eu-north-1.compute.amazonaws.com << 'EOF'
+        cd ~/actions-runner-backend/_work/carapp/carapp
+        git pull origin main
+        npm install
+        pm2 restart backend
+        EOF
+   
