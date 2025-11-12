@@ -10,7 +10,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // ✅ Routes
-router.post("/start-booking", upload.array("photos", 5), startBooking);
+router.post("/start-booking", upload.array("files", 10), startBooking);
 router.post("/complete-booking", upload.array("photos", 5), completeBooking);
 
 module.exports = router;
