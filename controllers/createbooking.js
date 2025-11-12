@@ -190,12 +190,12 @@ const getUserBookings = async (req, res) => {
 
 
 // *
- const getBookingById = async (req, res) => {
+const getBookingById = async (req, res) => {
   try {
     const { id } = req.params; // booking ID
     const userId = req.user.id; // from token middleware
 
-    // Fetch booking details + car + host + user info (now includes securityDeposit)
+    // 1️⃣ Fetch booking details + car + host + user info (including securityDeposit)
     const [rows] = await db.execute(
       `SELECT 
           r.*, 
@@ -229,21 +229,21 @@ const getUserBookings = async (req, res) => {
 
     const booking = rows[0];
 
-    // Fetch car images
+    // 2️⃣ Fetch car images
     const [images] = await db.execute(
       "SELECT imagePath FROM car_images WHERE carId = ?",
       [booking.carId]
     );
     booking.images = images.map((i) => i.imagePath);
 
-    // Fetch car features
+    // 3️⃣ Fetch car features
     const [features] = await db.execute(
       "SELECT feature FROM car_features WHERE carId = ?",
       [booking.carId]
     );
     booking.features = features.map((f) => f.feature);
 
-    // Fetch average rating
+    // 4️⃣ Fetch average rating
     const [ratingResult] = await db.execute(
       "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
       [booking.carId]
@@ -253,7 +253,21 @@ const getUserBookings = async (req, res) => {
       : 0;
     booking.totalReviews = ratingResult[0].totalReviews;
 
-    // ✅ Include securityDeposit clearly in the response
+    // 5️⃣ Fetch pickup & drop photos separately
+    const [photos] = await db.execute(
+      "SELECT photoUrl, photoType FROM reservation_photos WHERE reservationId = ?",
+      [booking.id]
+    );
+
+    booking.pickupPhotos = photos
+      .filter((p) => p.photoType === "PICKUP")
+      .map((p) => p.photoUrl);
+
+    booking.dropPhotos = photos
+      .filter((p) => p.photoType === "DROP")
+      .map((p) => p.photoUrl);
+
+    // 6️⃣ Include securityDeposit clearly
     booking.securityDeposit = booking.securityDeposit || 0;
 
     res.status(200).json({ success: true, booking });
@@ -266,6 +280,7 @@ const getUserBookings = async (req, res) => {
     });
   }
 };
+
 
 
 
