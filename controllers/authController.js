@@ -2,6 +2,7 @@ const db = require("../config/db");
 const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const twilio = require("twilio");
+const s3 = require("../config/s3"); // your S3 upload config
 
 require("dotenv").config({ path: "../.env" }); // if .env is in parent folder
 
@@ -150,18 +151,16 @@ exports.getProfile = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    const userId = req.user.id; // ✅ Get user ID from token
-    const { name, email, phoneNumber, profileImage } = req.body;
+    const userId = req.user.id; // get from token
+    const { name, email, phoneNumber } = req.body;
 
-    // ✅ Validate input
-    if (!name && !email && !phoneNumber && !profileImage) {
+    if (!name && !email && !phoneNumber && !req.file) {
       return res.status(400).json({
         success: false,
         message: "No update fields provided",
       });
     }
 
-    // ✅ Build dynamic update query
     const fields = [];
     const values = [];
 
@@ -177,18 +176,29 @@ exports.updateProfile = async (req, res) => {
       fields.push("phoneNumber = ?");
       values.push(phoneNumber);
     }
-    if (profileImage) {
+
+    // ✅ Upload image to S3 if file exists
+    if (req.file) {
+      const fileKey = `profileImages/${uuidv4()}_${req.file.originalname}`;
+
+      const uploadResult = await s3
+        .upload({
+          Bucket: process.env.S3_BUCKET,
+          Key: fileKey,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+          ACL: "public-read", // make it public if needed
+        })
+        .promise();
+
       fields.push("profileImage = ?");
-      values.push(profileImage);
+      values.push(uploadResult.Location);
     }
 
     values.push(userId); // for WHERE clause
-
     const sql = `UPDATE users SET ${fields.join(", ")} WHERE id = ?`;
-
     await db.execute(sql, values);
 
-    // ✅ Fetch updated user data
     const [updatedUser] = await db.execute(
       "SELECT id, name, email, phoneNumber, role, isVerified, profileImage FROM users WHERE id = ?",
       [userId]

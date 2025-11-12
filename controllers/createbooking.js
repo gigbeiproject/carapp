@@ -278,7 +278,7 @@ const getBookingById = async (req, res) => {
       message: "Internal Server Error",
       error: err.message,
     });
-  }
+  } 
 };
 
 
