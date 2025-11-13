@@ -128,7 +128,7 @@ const getUserBookings = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Fetch all bookings for the user with related car and host info
+    // Fetch all bookings for this user along with car + host details
     const [bookings] = await db.execute(
       `SELECT 
           r.*, 
@@ -151,24 +151,24 @@ const getUserBookings = async (req, res) => {
       [userId]
     );
 
-    // Enrich each booking with images, features, and ratings
+    // Helper to enrich bookings with images, features, and ratings
     const enrichBookings = async (bookings) => {
       for (const r of bookings) {
-        // Images
+        // Car images
         const [images] = await db.execute(
           "SELECT imagePath FROM car_images WHERE carId = ?",
           [r.carId]
         );
         r.images = images.map((i) => i.imagePath);
 
-        // Features
+        // Car features
         const [features] = await db.execute(
           "SELECT feature FROM car_features WHERE carId = ?",
           [r.carId]
         );
         r.features = features.map((f) => f.feature);
 
-        // Ratings
+        // Average rating and review count
         const [ratingResult] = await db.execute(
           "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
           [r.carId]
@@ -181,9 +181,10 @@ const getUserBookings = async (req, res) => {
       return bookings;
     };
 
+    // Enrich all bookings with details
     const enrichedBookings = await enrichBookings(bookings);
 
-    // Separate upcoming vs completed based on status
+    // Split into upcoming and completed arrays based on status
     const upcomingStatuses = ["PENDING", "CONFIRMED", "CANCELLED", "START"];
     const upcoming = enrichedBookings.filter((b) =>
       upcomingStatuses.includes(b.status)
@@ -192,17 +193,11 @@ const getUserBookings = async (req, res) => {
       (b) => b.status === "COMPLETED"
     );
 
-    // ✅ Send only one array depending on the latest booking status
-    let responseData;
-    if (completed.length > 0) {
-      responseData = { completed };
-    } else {
-      responseData = { upcoming };
-    }
-
+    // ✅ Always return both arrays
     res.status(200).json({
       success: true,
-      ...responseData,
+      upcoming,
+      completed,
     });
   } catch (err) {
     console.error("Error fetching user bookings:", err);
@@ -213,6 +208,7 @@ const getUserBookings = async (req, res) => {
     });
   }
 };
+
 
 
 
