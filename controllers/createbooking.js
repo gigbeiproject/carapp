@@ -128,39 +128,44 @@ const getUserBookings = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 1️⃣ Upcoming bookings
-    const [upcoming] = await db.execute(
-      `SELECT r.*, c.title AS carTitle, c.pricePerHour, c.city, c.fuelType, c.transmissionType,
-              c.seats, c.doors, c.luggageCapacity, c.userId AS hostId, u.name AS hostName, u.phoneNumber AS hostPhone
+    // Fetch all bookings for the user with related car and host info
+    const [bookings] = await db.execute(
+      `SELECT 
+          r.*, 
+          c.title AS carTitle, 
+          c.pricePerHour, 
+          c.city, 
+          c.fuelType, 
+          c.transmissionType,
+          c.seats, 
+          c.doors, 
+          c.luggageCapacity, 
+          c.userId AS hostId, 
+          u.name AS hostName, 
+          u.phoneNumber AS hostPhone
        FROM reservations r
        JOIN cars c ON r.carId = c.id
        JOIN users u ON c.userId = u.id
-       WHERE r.userId = ? AND r.status IN ('PENDING','CONFIRMED') AND r.endDate >= NOW()
-       ORDER BY r.startDate ASC`,
+       WHERE r.userId = ?
+       ORDER BY r.startDate DESC`,
       [userId]
     );
 
-    // 2️⃣ Completed bookings
-    const [completed] = await db.execute(
-      `SELECT r.*, c.title AS carTitle, c.pricePerHour, c.city, c.fuelType, c.transmissionType,
-              c.seats, c.doors, c.luggageCapacity, c.userId AS hostId, u.name AS hostName, u.phoneNumber AS hostPhone
-       FROM reservations r
-       JOIN cars c ON r.carId = c.id
-       JOIN users u ON c.userId = u.id
-       WHERE r.userId = ? AND (r.status = 'COMPLETED' OR r.endDate < NOW())
-       ORDER BY r.endDate DESC`,
-      [userId]
-    );
-
-    // Function to enrich bookings with images, features, ratings
+    // Enrich each booking with images, features, and ratings
     const enrichBookings = async (bookings) => {
       for (const r of bookings) {
         // Images
-        const [images] = await db.execute("SELECT imagePath FROM car_images WHERE carId = ?", [r.carId]);
+        const [images] = await db.execute(
+          "SELECT imagePath FROM car_images WHERE carId = ?",
+          [r.carId]
+        );
         r.images = images.map((i) => i.imagePath);
 
         // Features
-        const [features] = await db.execute("SELECT feature FROM car_features WHERE carId = ?", [r.carId]);
+        const [features] = await db.execute(
+          "SELECT feature FROM car_features WHERE carId = ?",
+          [r.carId]
+        );
         r.features = features.map((f) => f.feature);
 
         // Ratings
@@ -168,25 +173,47 @@ const getUserBookings = async (req, res) => {
           "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
           [r.carId]
         );
-        r.avgRating = ratingResult[0].avgRating ? parseFloat(ratingResult[0].avgRating.toFixed(1)) : 0;
+        r.avgRating = ratingResult[0].avgRating
+          ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+          : 0;
         r.totalReviews = ratingResult[0].totalReviews;
       }
       return bookings;
     };
 
-    const enrichedUpcoming = await enrichBookings(upcoming);
-    const enrichedCompleted = await enrichBookings(completed);
+    const enrichedBookings = await enrichBookings(bookings);
+
+    // Separate upcoming vs completed based on status
+    const upcomingStatuses = ["PENDING", "CONFIRMED", "CANCELLED", "START"];
+    const upcoming = enrichedBookings.filter((b) =>
+      upcomingStatuses.includes(b.status)
+    );
+    const completed = enrichedBookings.filter(
+      (b) => b.status === "COMPLETED"
+    );
+
+    // ✅ Send only one array depending on the latest booking status
+    let responseData;
+    if (completed.length > 0) {
+      responseData = { completed };
+    } else {
+      responseData = { upcoming };
+    }
 
     res.status(200).json({
       success: true,
-      upcoming: enrichedUpcoming,
-      completed: enrichedCompleted
+      ...responseData,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Internal Server Error", error: err.message });
+    console.error("Error fetching user bookings:", err);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: err.message,
+    });
   }
 };
+
 
 
 // *
