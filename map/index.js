@@ -33,6 +33,8 @@ const ChatRoute = require("../routes/chat/ChatRoute");
 
 const UserRouteadmin = require("../routes/adminroute/UserRoute");
 
+const notifications = require("../routes/notifications");
+
 app.use(cors());
 app.use(express.json()); // parses application/json
 app.use(express.urlencoded({ extended: true })); // parses form-data
@@ -86,6 +88,9 @@ app.use("/host/car", HostCarRoute);
 
 
 app.use("/chat", ChatRoute);
+
+
+app.use("/api/notification", notifications);
 
 
 

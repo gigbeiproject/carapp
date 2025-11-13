@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require("uuid");
 const razorpay = require("../config/razorpay");
 const crypto = require("crypto");
 const db = require("../config/db"); // ✅ Add this
+const axios = require("axios");
 
 const createBookingOrder = async (req, res) => {
   try {
@@ -36,7 +37,6 @@ const createBookingOrder = async (req, res) => {
 };
 
 
-
 const verifyBookingPayment = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -61,23 +61,26 @@ const verifyBookingPayment = async (req, res) => {
     // ✅ Verify Razorpay signature
     const body = razorpay_order_id + "|" + razorpay_payment_id;
     const expectedSignature = crypto
-      .createHmac("sha256", "TwDaASCKy0D6jAYWpS9L1SkF") // use process.env.RAZORPAY_KEY_SECRET in production
+      .createHmac("sha256", "TwDaASCKy0D6jAYWpS9L1SkF") // ⚠️ Replace with process.env.RAZORPAY_KEY_SECRET
       .update(body.toString())
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
-      return res.status(400).json({ success: false, message: "Payment verification failed" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment verification failed" });
     }
 
-    // ✅ Get car's owner (hostId)
-    const [carRows] = await db.query("SELECT userId FROM cars WHERE id = ?", [carId]);
+    // ✅ Get car owner (host)
+    const [carRows] = await db.query("SELECT userId, title FROM cars WHERE id = ?", [carId]);
     if (carRows.length === 0) {
       return res.status(404).json({ success: false, message: "Car not found" });
     }
 
     const hostId = carRows[0].userId;
+    const carTitle = carRows[0].title;
 
-    // ✅ Create booking with hostId & settlementStatus
+    // ✅ Create booking
     const bookingId = uuidv4();
     await db.query(
       `INSERT INTO reservations 
@@ -107,9 +110,39 @@ const verifyBookingPayment = async (req, res) => {
       ]
     );
 
+    // ✅ Fetch host Expo token
+    const [tokenRows] = await db.query(
+      "SELECT expoPushToken FROM user_tokens WHERE userId = ?",
+      [hostId]
+    );
+
+    if (tokenRows.length > 0) {
+      const expoPushToken = tokenRows[0].expoPushToken;
+
+      // ✅ Send notification to host
+      const message = {
+        to: expoPushToken,
+        sound: "default",
+        title: "🚗 New Booking Received!",
+        body: `Your car "${carTitle}" has been booked successfully.`,
+      };
+
+      await axios.post("https://exp.host/--/api/v2/push/send", message, {
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip, deflate",
+          "Content-Type": "application/json",
+        },
+      });
+
+      console.log(`✅ Push notification sent to host (${hostId})`);
+    } else {
+      console.log(`⚠️ No Expo token found for hostId: ${hostId}`);
+    }
+
     return res.json({
       success: true,
-      message: "Payment verified & booking confirmed",
+      message: "Payment verified, booking confirmed, notification sent",
       bookingId,
     });
   } catch (err) {
@@ -121,6 +154,7 @@ const verifyBookingPayment = async (req, res) => {
     });
   }
 };
+
 
 
 
@@ -216,7 +250,7 @@ const getUserBookings = async (req, res) => {
 const getBookingById = async (req, res) => {
   try {
     const { id } = req.params; // booking ID
-    const userId = req.user.id; // from token middleware
+    const userId = req.user.id; // from token middlew are
 
     // 1️⃣ Fetch booking details + car + host + user info (including securityDeposit)
     const [rows] = await db.execute(
@@ -233,7 +267,7 @@ const getBookingById = async (req, res) => {
           c.luggageCapacity, 
           c.userId AS hostId, 
           h.name AS hostName, 
-          h.phoneNumber AS hostPhone,
+          h.phoneNumber AS  ,
           h.email AS hostEmail,
           u.name AS userName,
           u.phoneNumber AS userPhone,
