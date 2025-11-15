@@ -120,11 +120,11 @@ exports.verifyOtp = async (req, res) => {
 
 exports.getProfile = async (req, res) => {
   try {
-    const userId = req.user.id; // from vehrifyToken middleware
+    const userId = req.user.id; // from verifyToken middleware
 
     // 1️⃣ Fetch basic user info
     const [rows] = await db.execute(
-      "SELECT id, phoneNumber, role,name,email,dob,  isVerified FROM users WHERE id = ?",
+      "SELECT id, phoneNumber, role, name, email, dob, isVerified FROM users WHERE id = ?",
       [userId]
     );
 
@@ -139,15 +139,23 @@ exports.getProfile = async (req, res) => {
       "SELECT id FROM cars WHERE userId = ? LIMIT 1",
       [userId]
     );
+    user.isHost = cars.length > 0;
 
-    user.isHost = cars.length > 0; // true if user has any car, false otherwise
+    // 3️⃣ Check if user has expoPushToken in user_tokens
+    const [tokens] = await db.execute(
+      "SELECT id FROM user_tokens WHERE userId = ? LIMIT 1",
+      [userId]
+    );
+    user.notification = tokens.length > 0; // true = notification ON, false = OFF
 
     res.json({ success: true, user });
+
   } catch (error) {
     console.error("Get profile error:", error);
     res.status(500).json({ success: false, error: "Server error" });
   }
 };
+
 
 exports.updateProfile = async (req, res) => {
   try {
