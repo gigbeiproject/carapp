@@ -268,3 +268,39 @@ exports.deleteAccount = async (req, res) => {
     connection.release();
   }
 };
+
+
+// DELETE Expo Push Token
+exports.deleteDeviceToken = async (req, res) => {
+  try {
+    const userId = req.user.id; // from your JWT auth middleware
+
+    // Delete all tokens of logged-in user
+    const [result] = await db.execute(
+      "DELETE FROM user_tokens WHERE userId = ?",
+      [userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No device token found for this user",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Device token(s) deleted successfully",
+    });
+
+  } catch (err) {
+    console.error("Delete token error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: err.message,
+    });
+  }
+};
+
+

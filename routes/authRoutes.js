@@ -20,4 +20,8 @@ router.put(
 
 router.delete("/delete-account", protect, authController.deleteAccount);
 
+router.delete("/device-token", protect, authController.deleteDeviceToken);
+
+
+
 module.exports = router;

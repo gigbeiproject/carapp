@@ -7,6 +7,6 @@ const { protect } = require("../middleware/auth"); // JWT auth middleware
 router.post("/reviews", protect, addCarReview);
 
 // Get reviews for a car
-router.get("/   /:carId", getCarReviews);
+router.get("/reviews/:carId", getCarReviews);
 
 module.exports = router;
