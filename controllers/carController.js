@@ -371,13 +371,16 @@ exports.updateCar = async (req, res) => {
 
   try {
     const { id } = req.params; // carId
-    const userId = req.user.id; // from JWT middleware
+    const userId = req.user.id;
+
+    // Parse JSON string
     const carData = JSON.parse(req.body.carData);
 
     const {
       title,
       city,
       pricePerHour,
+      securityDeposit = 0, // ✅ Added new field
       seats,
       doors,
       luggageCapacity,
@@ -387,36 +390,69 @@ exports.updateCar = async (req, res) => {
       carCategoryId,
       lat,
       long,
-      driverAvailable,
-      pickupDropAvailable,
-      carFeatures = []
+      driverAvailable = false,
+      pickupDropAvailable = false,
+      carFeatures = [],
     } = carData;
 
-    // Verify car belongs to user (security)
+    // Check ownership
     const [existing] = await connection.execute(
       "SELECT id FROM cars WHERE id = ? AND userId = ?",
       [id, userId]
     );
+
     if (existing.length === 0) {
-      return res.status(403).json({ success: false, message: "Unauthorized or car not found" });
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized or car not found",
+      });
     }
 
-    // Update car details
+    // ✅ Update cars table
     await connection.execute(
-      `UPDATE cars SET 
-        title = ?, city = ?, pricePerHour = ?, seats = ?, doors = ?, luggageCapacity = ?,
-        fuelType = ?, transmissionType = ?, carLocation = ?, carCategoryId = ?, lat = ?, lng = ?, 
-        driverAvailable = ?, pickupDropAvailable = ? 
+      `UPDATE cars SET
+        title = ?, 
+        city = ?, 
+        pricePerHour = ?, 
+        securityDeposit = ?, 
+        seats = ?, 
+        doors = ?, 
+        luggageCapacity = ?, 
+        fuelType = ?, 
+        transmissionType = ?, 
+        carLocation = ?, 
+        carCategoryId = ?, 
+        lat = ?, 
+        lng = ?, 
+        driverAvailable = ?, 
+        pickupDropAvailable = ?
       WHERE id = ?`,
       [
-        title, city, pricePerHour, seats, doors, luggageCapacity,
-        fuelType, transmissionType, carLocation, carCategoryId,
-        lat, long, driverAvailable, pickupDropAvailable, id
+        title,
+        city,
+        pricePerHour,
+        securityDeposit, // new field
+        seats,
+        doors,
+        luggageCapacity,
+        fuelType,
+        transmissionType,
+        carLocation,
+        carCategoryId,
+        lat,
+        long,
+        driverAvailable,
+        pickupDropAvailable,
+        id,
       ]
     );
 
-    // Replace features
-    await connection.execute("DELETE FROM car_features WHERE carId = ?", [id]);
+    // ✅ Replace car features
+    await connection.execute(
+      "DELETE FROM car_features WHERE carId = ?",
+      [id]
+    );
+
     if (carFeatures.length > 0) {
       for (let feature of carFeatures) {
         await connection.execute(
@@ -426,10 +462,14 @@ exports.updateCar = async (req, res) => {
       }
     }
 
-    // Add new images if provided
+    // ✅ Add new car images (optional)
     if (req.files && req.files.carImages) {
       for (let file of req.files.carImages) {
-        const upload = await uploadToS3(file.buffer, file.originalname, "car-images");
+        const upload = await uploadToS3(
+          file.buffer,
+          file.originalname,
+          "car-images"
+        );
         await connection.execute(
           `INSERT INTO car_images (carId, imagePath) VALUES (?, ?)`,
           [id, upload.Location]
@@ -437,13 +477,17 @@ exports.updateCar = async (req, res) => {
       }
     }
 
-    // Add new documents if provided
+    // ✅ Add new documents (optional)
     const docTypes = ["rc", "insurance", "pollution", "aadhar", "license", "video"];
     if (req.files) {
       for (let type of docTypes) {
         if (req.files[type]) {
           for (let file of req.files[type]) {
-            const upload = await uploadToS3(file.buffer, file.originalname, "car-documents");
+            const upload = await uploadToS3(
+              file.buffer,
+              file.originalname,
+              "car-documents"
+            );
             await connection.execute(
               `INSERT INTO car_documents (carId, type, filePath) VALUES (?, ?, ?)`,
               [id, type, upload.Location]
@@ -454,16 +498,23 @@ exports.updateCar = async (req, res) => {
     }
 
     await connection.commit();
-    res.json({ success: true, message: "Car listing updated successfully" });
-
+    res.json({
+      success: true,
+      message: "Car listing updated successfully",
+    });
   } catch (err) {
     await connection.rollback();
     console.error("Error updating car:", err);
-    res.status(500).json({ success: false, message: "Error updating car", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Error updating car",
+      error: err.message,
+    });
   } finally {
     connection.release();
   }
 };
+
 
 
 // ================================

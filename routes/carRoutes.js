@@ -22,13 +22,14 @@ router.post(
 );
 
 
-router.get("/", getAllCars);       // GET all
+router.get("/", getAllCars); 
+      // GET all
 router.get("/:id",getCarById);       
 
 router.get("/user/:userId", getCarsByUserId);
 
 
-router.put("/:id", protect, upload.fields([
+router.put("/update/:id", protect, upload.fields([
   { name: "carImages" },
   { name: "rc" },
   { name: "insurance" },
@@ -42,7 +43,7 @@ router.put("/:id", protect, upload.fields([
 router.delete("/:id", protect, deleteCar);
 
 
-router.put("/:id", protect, toggleCarEnabled);
+router.put("/carenabled/:id", protect, toggleCarEnabled);
 
 
 router.put("/repair/:id", protect, toggleCarRepairMode);
