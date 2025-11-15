@@ -13,7 +13,7 @@ router.post("/verify-payment", protect, verifyBookingPayment);
 
 router.get("/orders", protect, getUserBookings);
 
-router.get("/:id", protect, getBookingById);
+router.get("/book/:id", protect, getBookingById);
 
 router.put("/cancel-booking/:reservationId",protect, cancelBooking); // PUT or PATCH
 

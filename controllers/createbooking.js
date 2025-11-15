@@ -245,7 +245,7 @@ const getUserBookings = async (req, res) => {
 
 
 
-
+// repire
 // *
 const getBookingById = async (req, res) => {
   try {
@@ -253,32 +253,33 @@ const getBookingById = async (req, res) => {
     const userId = req.user.id; // from token middlew are
 
     // 1️⃣ Fetch booking details + car + host + user info (including securityDeposit)
-    const [rows] = await db.execute(
-      `SELECT 
-          r.*, 
-          c.title AS carTitle, 
-          c.pricePerHour, 
-          c.securityDeposit, 
-          c.city, 
-          c.fuelType, 
-          c.transmissionType,
-          c.seats, 
-          c.doors, 
-          c.luggageCapacity, 
-          c.userId AS hostId, 
-          h.name AS hostName, 
-          h.phoneNumber AS  ,
-          h.email AS hostEmail,
-          u.name AS userName,
-          u.phoneNumber AS userPhone,
-          u.email AS userEmail
-       FROM reservations r
-       JOIN cars c ON r.carId = c.id
-       JOIN users h ON c.userId = h.id  -- host details
-       JOIN users u ON r.userId = u.id  -- user details
-       WHERE r.id = ? AND r.userId = ?`,
-      [id, userId]
-    );
+   const [rows] = await db.execute(
+  `SELECT 
+      r.*, 
+      c.title AS carTitle, 
+      c.pricePerHour, 
+      c.securityDeposit, 
+      c.city, 
+      c.fuelType, 
+      c.transmissionType,
+      c.seats, 
+      c.doors, 
+      c.luggageCapacity, 
+      c.userId AS hostId, 
+      h.name AS hostName, 
+      h.phoneNumber AS hostPhone,
+      h.email AS hostEmail,
+      u.name AS userName,
+      u.phoneNumber AS userPhone,
+      u.email AS userEmail
+   FROM reservations r
+   JOIN cars c ON r.carId = c.id
+   JOIN users h ON c.userId = h.id   -- host
+   JOIN users u ON r.userId = u.id   -- user
+   WHERE r.id = ? AND r.userId = ?`,
+  [id, userId]
+);
+
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: "Booking not found" });
