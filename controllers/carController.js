@@ -307,9 +307,17 @@ exports.getCarById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Fetch car along with owner's name and phoneNumber
+    // Fetch car + host details + host profilePic + new ID/DL images
     const [cars] = await db.execute(
-      `SELECT c.*, u.name AS hostName, u.phoneNumber AS hostPhone
+      `SELECT 
+          c.*, 
+          u.name AS hostName, 
+          u.phoneNumber AS hostPhone,
+          u.profilePic AS hostProfilePic,
+          u.drivingLicenseImg AS hostDlFront,
+          u.drivingLicenseBackImg AS hostDlBack,
+          u.idProofImg AS hostIdFront,
+          u.idProofBackImg AS hostIdBack
        FROM cars c
        JOIN users u ON c.userId = u.id
        WHERE c.id = ?`,
@@ -322,7 +330,7 @@ exports.getCarById = async (req, res) => {
 
     const car = cars[0];
 
-    // Fetch images, documents, and features
+    // Fetch images, documents, features
     const [images] = await db.execute(
       "SELECT imagePath FROM car_images WHERE carId = ?",
       [id]
@@ -336,31 +344,39 @@ exports.getCarById = async (req, res) => {
       [id]
     );
 
-    // Fetch average rating and total reviews
+    // Fetch rating summary
     const [ratingResult] = await db.execute(
       "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
       [id]
     );
 
-    // Fetch total bookings
+    // Total bookings count
     const [bookingResult] = await db.execute(
       "SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?",
       [id]
     );
 
+    // Assign values
     car.images = images.map((i) => i.imagePath);
     car.documents = documents;
     car.features = features.map((f) => f.feature);
-    car.avgRating = ratingResult[0].avgRating ? parseFloat(ratingResult[0].avgRating.toFixed(1)) : 0;
+    car.avgRating = ratingResult[0].avgRating
+      ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+      : 0;
     car.totalReviews = ratingResult[0].totalReviews;
     car.bookingCount = bookingResult[0].bookingCount;
 
     res.json({ success: true, data: car });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: "Error fetching car", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Error fetching car",
+      error: err.message,
+    });
   }
 };
+
 
 // ================================
 // Update Car Listing
