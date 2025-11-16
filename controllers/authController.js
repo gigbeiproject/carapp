@@ -230,7 +230,7 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-  
+
 exports.deleteAccount = async (req, res) => {
   const connection = await db.getConnection();
   await connection.beginTransaction();
@@ -309,5 +309,104 @@ exports.deleteDeviceToken = async (req, res) => {
     });
   }
 };
+
+
+
+exports.uploadDocuments = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    if (!req.files || Object.keys(req.files).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No documents provided",
+      });
+    }
+
+    const fields = [];
+    const values = [];
+
+    // Helper function to upload to S3
+    const uploadToS3 = async (file, folder) => {
+      const fileKey = `${folder}/${uuidv4()}_${file.originalname}`;
+
+      const uploadResult = await s3
+        .upload({
+          Bucket: process.env.S3_BUCKET,
+          Key: fileKey,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+        })
+        .promise();
+
+      return uploadResult.Location;
+    };
+
+    // 1️⃣ Driving License Front
+    if (req.files.drivingLicenseImg) {
+      const url = await uploadToS3(req.files.drivingLicenseImg[0], "documents");
+      fields.push("drivingLicenseImg = ?");
+      values.push(url);
+    }
+
+    // 2️⃣ Driving License Back
+    if (req.files.drivingLicenseBackImg) {
+      const url = await uploadToS3(req.files.drivingLicenseBackImg[0], "documents");
+      fields.push("drivingLicenseBackImg = ?");
+      values.push(url);
+    }
+
+    // 3️⃣ ID Proof Front
+    if (req.files.idProofImg) {
+      const url = await uploadToS3(req.files.idProofImg[0], "documents");
+      fields.push("idProofImg = ?");
+      values.push(url);
+    }
+
+    // 4️⃣ ID Proof Back
+    if (req.files.idProofBackImg) {
+      const url = await uploadToS3(req.files.idProofBackImg[0], "documents");
+      fields.push("idProofBackImg = ?");
+      values.push(url);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid document fields provided",
+      });
+    }
+
+    values.push(userId);
+
+    // Update DB
+    const sql = `UPDATE users SET ${fields.join(", ")} WHERE id = ?`;
+    await db.execute(sql, values);
+
+    // Fetch updated user docs
+    const [updatedUser] = await db.execute(
+      `SELECT drivingLicenseImg, drivingLicenseBackImg, idProofImg, idProofBackImg 
+       FROM users WHERE id = ?`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      message: "Documents uploaded successfully",
+      documents: updatedUser[0],
+    });
+
+  } catch (error) {
+    console.error("Document Upload Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+
 
 

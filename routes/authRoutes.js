@@ -23,5 +23,18 @@ router.delete("/delete-account", protect, authController.deleteAccount);
 router.delete("/device-token", protect, authController.deleteDeviceToken);
 
 
+router.post(
+  "/upload-documents",
+  protect,
+  upload.fields([
+    { name: "drivingLicenseImg", maxCount: 1 },
+    { name: "drivingLicenseBackImg", maxCount: 1 },
+    { name: "idProofImg", maxCount: 1 },
+    { name: "idProofBackImg", maxCount: 1 },
+  ]),
+  authController.uploadDocuments
+);
+
+
 
 module.exports = router;
