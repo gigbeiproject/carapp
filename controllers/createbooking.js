@@ -13,11 +13,9 @@ const createBookingOrder = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // ---------------------------------------------
-    // 1️⃣ CHECK USER VERIFICATION STATUS
-    // ---------------------------------------------
-    const [userRows] = await db.execute(
-      "SELECT isVerified FROM users WHERE id = ?",
+    // 👉 STEP 1: Get user status
+    const [userRows] = await pool.query(
+      "SELECT isVerified FROM users WHERE id = ? LIMIT 1",
       [userId]
     );
 
@@ -27,29 +25,34 @@ const createBookingOrder = async (req, res) => {
 
     const isVerified = userRows[0].isVerified;
 
-    // ---------------------------------------------
-    // 2️⃣ Verification Rules
-    // ---------------------------------------------
+    // 👉 STEP 2: If user is NOT verified, check booking limits
     if (isVerified === 0) {
-      // Check if user already booked once
-      const [bookingRows] = await db.execute(
-        "SELECT COUNT(*) AS bookingCount FROM reservations WHERE userId = ?",
+      // Check if user has any previous bookings
+      const [bookingRows] = await pool.query(
+        "SELECT status FROM reservations WHERE userId = ? ORDER BY createdAt DESC LIMIT 1",
         [userId]
       );
 
-      if (bookingRows[0].bookingCount > 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Please verify your account before making a new booking",
-        });
+      if (bookingRows.length > 0) {
+        const lastStatus = bookingRows[0].status;
+
+        // ❌ User has previous booking and it's NOT PENDING → BLOCK
+        if (lastStatus !== "PENDING") {
+          return res.status(404).json({
+            success: false,
+            message:
+              "Your account is not verified. You can book only one time. Please verify your account to continue."
+          });
+        }
+
+        // ⚠️ User has old booking but status is PENDING → ALLOW only this time
       }
+      // ✔ If no old booking → allow first time
     }
 
-    // ---------------------------------------------
-    // 3️⃣ Create Razorpay Order
-    // ---------------------------------------------
+    // 👉 STEP 3: Create Razorpay Order
     const options = {
-      amount: Math.round(amount * 100),
+      amount: Math.round(amount * 100), // amount in paise
       currency: "INR",
       receipt: uuidv4(),
       payment_capture: 1,
@@ -57,22 +60,8 @@ const createBookingOrder = async (req, res) => {
 
     const order = await razorpay.orders.create(options);
 
-    // ---------------------------------------------
-    // 4️⃣ TEMPORARY SAVE BOOKING (OPTIONAL)
-    // ---------------------------------------------
-    await db.execute(
-      `INSERT INTO reservations 
-        (id, userId, carId, startDate, endDate, amount, totalHours, status, orderId, createdAt) 
-       VALUES (UUID(), ?, ?, ?, ?, ?, ?, 'PENDING', ?, NOW())`,
-      [userId, carId, startDate, endDate, amount, totalHours, order.id]
-    );
-
-    // ---------------------------------------------
-    // RESPONSE
-    // ---------------------------------------------
     return res.json({
       success: true,
-      message: "Order created successfully",
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
@@ -83,6 +72,7 @@ const createBookingOrder = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 
 
 
