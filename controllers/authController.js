@@ -124,7 +124,7 @@ exports.getProfile = async (req, res) => {
 
     // 1️⃣ Fetch basic user info
     const [rows] = await db.execute(
-      "SELECT id, phoneNumber, role, name, email, dob, isVerified FROM users WHERE id = ?",
+      "SELECT id, phoneNumber, role, name, email, dob, profilePic, isVerified FROM users WHERE id = ?",
       [userId]
     );
 
