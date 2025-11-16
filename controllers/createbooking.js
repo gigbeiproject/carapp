@@ -289,36 +289,50 @@ const getUserBookings = async (req, res) => {
 const getBookingById = async (req, res) => {
   try {
     const { id } = req.params; // booking ID
-    const userId = req.user.id; // from token middlew are
+    const userId = req.user.id; // from token middleware
 
-    // 1️⃣ Fetch booking details + car + host + user info (including securityDeposit)
-   const [rows] = await db.execute(
-  `SELECT 
-      r.*, 
-      c.title AS carTitle, 
-      c.pricePerHour, 
-      c.securityDeposit, 
-      c.city, 
-      c.fuelType, 
-      c.transmissionType,
-      c.seats, 
-      c.doors, 
-      c.luggageCapacity, 
-      c.userId AS hostId, 
-      h.name AS hostName, 
-      h.phoneNumber AS hostPhone,
-      h.email AS hostEmail,
-      u.name AS userName,
-      u.phoneNumber AS userPhone,
-      u.email AS userEmail
-   FROM reservations r
-   JOIN cars c ON r.carId = c.id
-   JOIN users h ON c.userId = h.id   -- host
-   JOIN users u ON r.userId = u.id   -- user
-   WHERE r.id = ? AND r.userId = ?`,
-  [id, userId]
-);
+    // 1️⃣ Fetch booking details + car + host + user info (+ profilePic & new fields)
+    const [rows] = await db.execute(
+      `SELECT 
+          r.*, 
+          c.title AS carTitle, 
+          c.pricePerHour, 
+          c.securityDeposit, 
+          c.city, 
+          c.fuelType, 
+          c.transmissionType,
+          c.seats, 
+          c.doors, 
+          c.luggageCapacity, 
+          c.userId AS hostId, 
+          
+          -- HOST DETAILS
+          h.name AS hostName, 
+          h.phoneNumber AS hostPhone,
+          h.email AS hostEmail,
+          h.profilePic AS hostProfilePic,
+          h.drivingLicenseImg AS hostDlFront,
+          h.drivingLicenseBackImg AS hostDlBack,
+          h.idProofImg AS hostIdFront,
+          h.idProofBackImg AS hostIdBack,
 
+          -- USER DETAILS
+          u.name AS userName,
+          u.phoneNumber AS userPhone,
+          u.email AS userEmail,
+          u.profilePic AS userProfilePic,
+          u.drivingLicenseImg AS userDlFront,
+          u.drivingLicenseBackImg AS userDlBack,
+          u.idProofImg AS userIdFront,
+          u.idProofBackImg AS userIdBack
+
+       FROM reservations r
+       JOIN cars c ON r.carId = c.id
+       JOIN users h ON c.userId = h.id   -- host
+       JOIN users u ON r.userId = u.id   -- user
+       WHERE r.id = ? AND r.userId = ?`,
+      [id, userId]
+    );
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: "Booking not found" });
@@ -326,21 +340,21 @@ const getBookingById = async (req, res) => {
 
     const booking = rows[0];
 
-    // 2️⃣ Fetch car images
+    // 2️⃣ Car images
     const [images] = await db.execute(
       "SELECT imagePath FROM car_images WHERE carId = ?",
       [booking.carId]
     );
     booking.images = images.map((i) => i.imagePath);
 
-    // 3️⃣ Fetch car features
+    // 3️⃣ Car features
     const [features] = await db.execute(
       "SELECT feature FROM car_features WHERE carId = ?",
       [booking.carId]
     );
     booking.features = features.map((f) => f.feature);
 
-    // 4️⃣ Fetch average rating
+    // 4️⃣ Car rating
     const [ratingResult] = await db.execute(
       "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
       [booking.carId]
@@ -350,7 +364,7 @@ const getBookingById = async (req, res) => {
       : 0;
     booking.totalReviews = ratingResult[0].totalReviews;
 
-    // 5️⃣ Fetch pickup & drop photos separately
+    // 5️⃣ Pickup & Drop photos
     const [photos] = await db.execute(
       "SELECT photoUrl, photoType FROM reservation_photos WHERE reservationId = ?",
       [booking.id]
@@ -364,7 +378,7 @@ const getBookingById = async (req, res) => {
       .filter((p) => p.photoType === "DROP")
       .map((p) => p.photoUrl);
 
-    // 6️⃣ Include securityDeposit clearly
+    // 6️⃣ Ensure security deposit included
     booking.securityDeposit = booking.securityDeposit || 0;
 
     res.status(200).json({ success: true, booking });
@@ -375,7 +389,7 @@ const getBookingById = async (req, res) => {
       message: "Internal Server Error",
       error: err.message,
     });
-  } 
+  }
 };
 
 
