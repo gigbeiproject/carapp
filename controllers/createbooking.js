@@ -14,7 +14,7 @@ const createBookingOrder = async (req, res) => {
     }
 
     // 👉 STEP 1: Get user status
-    const [userRows] = await pool.query(
+    const [userRows] = await db.query(
       "SELECT isVerified FROM users WHERE id = ? LIMIT 1",
       [userId]
     );
@@ -28,7 +28,7 @@ const createBookingOrder = async (req, res) => {
     // 👉 STEP 2: If user is NOT verified, check booking limits
     if (isVerified === 0) {
       // Check if user has any previous bookings
-      const [bookingRows] = await pool.query(
+      const [bookingRows] = await db.query(
         "SELECT status FROM reservations WHERE userId = ? ORDER BY createdAt DESC LIMIT 1",
         [userId]
       );
