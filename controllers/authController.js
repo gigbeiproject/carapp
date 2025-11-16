@@ -159,7 +159,7 @@ exports.getProfile = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    const userId = req.user.id; // get from token
+    const userId = req.user.id;
     const { name, email, phoneNumber } = req.body;
 
     if (!name && !email && !phoneNumber && !req.file) {
@@ -185,7 +185,7 @@ exports.updateProfile = async (req, res) => {
       values.push(phoneNumber);
     }
 
-    // ✅ Upload image to S3 if file exists
+    // ✅ Upload S3 image
     if (req.file) {
       const fileKey = `profileImages/${uuidv4()}_${req.file.originalname}`;
 
@@ -195,20 +195,22 @@ exports.updateProfile = async (req, res) => {
           Key: fileKey,
           Body: req.file.buffer,
           ContentType: req.file.mimetype,
-          ACL: "public-read", // make it public if needed
         })
         .promise();
 
-      fields.push("profileImage = ?");
+      // ❗ Correct field name: profilePic
+      fields.push("profilePic = ?");
       values.push(uploadResult.Location);
     }
 
-    values.push(userId); // for WHERE clause
+    values.push(userId);
+
     const sql = `UPDATE users SET ${fields.join(", ")} WHERE id = ?`;
     await db.execute(sql, values);
 
+    // ❗ Use correct DB field: profilePic
     const [updatedUser] = await db.execute(
-      "SELECT id, name, email, phoneNumber, role, isVerified, profileImage FROM users WHERE id = ?",
+      "SELECT id, name, email, phoneNumber, role, isVerified, profilePic FROM users WHERE id = ?",
       [userId]
     );
 
@@ -217,13 +219,18 @@ exports.updateProfile = async (req, res) => {
       message: "Profile updated successfully",
       user: updatedUser[0],
     });
+
   } catch (error) {
     console.error("Update profile error:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
-
+  
 exports.deleteAccount = async (req, res) => {
   const connection = await db.getConnection();
   await connection.beginTransaction();

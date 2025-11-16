@@ -33,29 +33,40 @@ exports.createCarCategory = async (req, res) => {
 // get by car category id
 exports.getCarsWithCategory = async (req, res) => {
   try {
-    const { city, category } = req.query; // optional filters
+    const { city, category } = req.query;
 
     let query = `
       SELECT 
         cars.id AS carId,
+        cars.userId,
         cars.title,
         cars.city,
         cars.pricePerHour,
+        cars.securityDeposit,
         cars.seats,
         cars.doors,
         cars.luggageCapacity,
         cars.fuelType,
         cars.transmissionType,
         cars.carLocation,
+        cars.carCategoryId,
         cars.lat,
         cars.lng,
         cars.driverAvailable,
         cars.pickupDropAvailable,
-        car_categories.id AS categoryId,
+        cars.createdAt,
+        cars.updatedAt,
+        cars.carApprovalStatus,
+        cars.repairMode,
+        cars.carEnabled,
+        
         car_categories.name AS categoryName,
-        car_categories.image AS categoryImage
+        car_categories.image AS categoryImage,
+        
+        car_images.imagePath
       FROM cars
       LEFT JOIN car_categories ON cars.carCategoryId = car_categories.id
+      LEFT JOIN car_images ON cars.id = car_images.carId
       WHERE 1=1
     `;
 
@@ -72,9 +83,64 @@ exports.getCarsWithCategory = async (req, res) => {
     }
 
     const [rows] = await pool.query(query, params);
-    res.status(200).json({ success: true, data: rows });
+
+    // Group images under each car
+    const carsMap = {};
+
+    rows.forEach(row => {
+      if (!carsMap[row.carId]) {
+        carsMap[row.carId] = {
+          carId: row.carId,
+          userId: row.userId,
+          title: row.title,
+          city: row.city,
+          pricePerHour: row.pricePerHour,
+          securityDeposit: row.securityDeposit,
+          seats: row.seats,
+          doors: row.doors,
+          luggageCapacity: row.luggageCapacity,
+          fuelType: row.fuelType,
+          transmissionType: row.transmissionType,
+          carLocation: row.carLocation,
+          carCategoryId: row.carCategoryId,
+          lat: row.lat,
+          lng: row.lng,
+          driverAvailable: row.driverAvailable,
+          pickupDropAvailable: row.pickupDropAvailable,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          carApprovalStatus: row.carApprovalStatus,
+          repairMode: row.repairMode,
+          carEnabled: row.carEnabled,
+
+          category: {
+            name: row.categoryName,
+            image: row.categoryImage
+          },
+
+          images: []
+        };
+      }
+
+      if (row.imagePath) {
+        carsMap[row.carId].images.push(row.imagePath);
+      }
+    });
+
+    const finalData = Object.values(carsMap);
+
+    res.status(200).json({
+      success: true,
+      data: finalData
+    });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message
+    });
   }
 };
+
