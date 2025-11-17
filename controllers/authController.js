@@ -38,14 +38,14 @@ exports.sendOtp = async (req, res) => {
     let otp;
 
     // 🧪 TEST MODE (Fixed OTP Only for Developer)
-    if (phoneNumber === "1111111111") {
+    if (phoneNumber === "+911111111111") {
       otp = "1234";
     } else {
       otp = generateOTP();
     }
 
     // 🚫 Do NOT send SMS for test number
-    if (phoneNumber !== "1111111111") {
+    if (phoneNumber !== "+911111111111") {
       await client.messages.create({
         body: `Your verification code is ${otp}`,
         from: process.env.TWILIO_PHONE_NUMBER,
