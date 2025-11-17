@@ -37,16 +37,15 @@ exports.sendOtp = async (req, res) => {
   try {
     let otp;
 
-    // ✅ Test mode for developer
+    // 🧪 TEST MODE (Fixed OTP Only for Developer)
     if (phoneNumber === "1111111111") {
-      otp = "1234"; // fixed test OTP
+      otp = "1234";
     } else {
-      otp = generateOTP(); // random OTP for real users
+      otp = generateOTP();
     }
 
-    // ⛔ Do NOT send SMS for test number
+    // 🚫 Do NOT send SMS for test number
     if (phoneNumber !== "1111111111") {
-      // Send OTP via Twilio
       await client.messages.create({
         body: `Your verification code is ${otp}`,
         from: process.env.TWILIO_PHONE_NUMBER,
@@ -54,20 +53,27 @@ exports.sendOtp = async (req, res) => {
       });
     }
 
-    // ✅ Store OTP in DB (works for test OR real)
+    // ✅ Save OTP in DB
     await db.execute(
-      `INSERT INTO otps (phoneNumber, otp, expiresAt) 
+      `INSERT INTO otps (phoneNumber, otp, expiresAt)
        VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))
        ON DUPLICATE KEY UPDATE otp = VALUES(otp), expiresAt = VALUES(expiresAt)`,
       [phoneNumber, otp]
     );
 
-    res.json({ success: true, message: "OTP sent successfully (test mode enabled)" });
+    res.json({
+      success: true,
+      message:
+        phoneNumber === "1111111111"
+          ? "OTP generated in test mode"
+          : "OTP sent successfully",
+    });
   } catch (error) {
     console.error("Send OTP error:", error);
     res.status(500).json({ error: "Failed to send OTP" });
   }
 };
+
 
 
 
