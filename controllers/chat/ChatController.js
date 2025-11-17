@@ -79,3 +79,49 @@ exports.getConversations = async (req, res) => {
   }
 };
 
+exports.startConversation = async (req, res) => {
+  const senderId = req.user.id;           // logged-in user
+  const { participantId } = req.body;     // user you want to chat with
+
+  if (!participantId) {
+    return res.status(400).json({ success: false, message: "participantId is required" });
+  }
+
+  try {
+    // 🔍 Check if conversation already exists
+    const [existing] = await db.query(
+      `SELECT id FROM conversations
+       WHERE (user1_id = ? AND user2_id = ?)
+       OR (user1_id = ? AND user2_id = ?) LIMIT 1`,
+      [senderId, participantId, participantId, senderId]
+    );
+
+    // ⚡ Conversation already exists → return it
+    if (existing.length > 0) {
+      return res.json({
+        success: true,
+        message: "Conversation already exists",
+        conversationId: existing[0].id
+      });
+    }
+
+    // 🆕 Create new conversation
+    const [newConv] = await db.query(
+      `INSERT INTO conversations (user1_id, user2_id, createdAt)
+       VALUES (?, ?, NOW())`,
+      [senderId, participantId]
+    );
+
+    return res.json({
+      success: true,
+      message: "Conversation started",
+      conversationId: newConv.insertId
+    });
+
+  } catch (err) {
+    console.error("Start conversation error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+
