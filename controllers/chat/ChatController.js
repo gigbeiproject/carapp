@@ -60,16 +60,14 @@ exports.getConversations = async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      `SELECT c.id AS conversationId, 
-              u.id AS userId, 
-              u.name, 
-              u.profilePic
+      `SELECT 
+          c.id AS conversationId,
+          u.id AS userId,
+          u.name,
+          u.profilePic
        FROM conversations c
-       JOIN users u 
-         ON (CASE 
-             WHEN c.user1_id = ? THEN c.user2_id = u.id 
-             ELSE c.user1_id = u.id 
-             END)
+       JOIN users u
+         ON u.id = IF(c.user1_id = ?, c.user2_id, c.user1_id)
        WHERE c.user1_id = ? OR c.user2_id = ?`,
       [userId, userId, userId]
     );
@@ -80,3 +78,4 @@ exports.getConversations = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+

@@ -25,6 +25,8 @@ const generateOTP = () =>
 /**
  * Send OTP Controller
  */
+
+
 exports.sendOtp = async (req, res) => {
   const { phoneNumber } = req.body;
 
@@ -33,16 +35,26 @@ exports.sendOtp = async (req, res) => {
   }
 
   try {
-    const otp = generateOTP();
+    let otp;
 
-    // ✅ Send OTP via Twilio SMS
-    await client.messages.create({
-      body: `Your verification code is ${otp}`,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`, // auto add +91 if missing
-    });
+    // ✅ Test mode for developer
+    if (phoneNumber === "1111111111") {
+      otp = "1234"; // fixed test OTP
+    } else {
+      otp = generateOTP(); // random OTP for real users
+    }
 
-    // ✅ Store OTP in DB
+    // ⛔ Do NOT send SMS for test number
+    if (phoneNumber !== "1111111111") {
+      // Send OTP via Twilio
+      await client.messages.create({
+        body: `Your verification code is ${otp}`,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`,
+      });
+    }
+
+    // ✅ Store OTP in DB (works for test OR real)
     await db.execute(
       `INSERT INTO otps (phoneNumber, otp, expiresAt) 
        VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))
@@ -50,12 +62,13 @@ exports.sendOtp = async (req, res) => {
       [phoneNumber, otp]
     );
 
-    res.json({ success: true, message: "OTP sent successfully" });
+    res.json({ success: true, message: "OTP sent successfully (test mode enabled)" });
   } catch (error) {
     console.error("Send OTP error:", error);
     res.status(500).json({ error: "Failed to send OTP" });
   }
 };
+
 
 
 exports.verifyOtp = async (req, res) => {
