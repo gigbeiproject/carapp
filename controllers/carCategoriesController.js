@@ -37,7 +37,7 @@ exports.getCarsWithCategory = async (req, res) => {
 
     let query = `
       SELECT 
-        cars.id AS id,
+        cars.id,
         cars.userId,
         cars.title,
         cars.city,
@@ -88,9 +88,9 @@ exports.getCarsWithCategory = async (req, res) => {
     const carsMap = {};
 
     rows.forEach(row => {
-      if (!carsMap[row.carId]) {
-        carsMap[row.carId] = {
-          carId: row.carId,
+      if (!carsMap[row.id]) {
+        carsMap[row.id] = {
+          id: row.id,
           userId: row.userId,
           title: row.title,
           city: row.city,
@@ -123,7 +123,7 @@ exports.getCarsWithCategory = async (req, res) => {
       }
 
       if (row.imagePath) {
-        carsMap[row.carId].images.push(row.imagePath);
+        carsMap[row.id].images.push(row.imagePath);
       }
     });
 
@@ -143,4 +143,5 @@ exports.getCarsWithCategory = async (req, res) => {
     });
   }
 };
+
 
