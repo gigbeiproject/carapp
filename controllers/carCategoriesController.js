@@ -37,7 +37,7 @@ exports.getCarsWithCategory = async (req, res) => {
 
     let query = `
       SELECT 
-        cars.id AS carId,
+        cars.id AS id,
         cars.userId,
         cars.title,
         cars.city,
