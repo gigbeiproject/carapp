@@ -36,7 +36,7 @@ jobs:
         mkdir -p ~/.ssh
         echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh -o StrictHostKeyChecking=no ubuntu@ec2-13-60-43-80.eu-north-1.compute.amazonaws.com << 'EOF'
+        ssh -o StrictHostKeyChecking=no ubuntu@ec2-13-61-135-29.eu-north-1.compute.amazonaws.com << 'EOF'
         cd  actions-runner-backend/_work/carapp/carapp
         git pull origin main
         npm install
