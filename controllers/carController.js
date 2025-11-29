@@ -5,11 +5,10 @@ const { v4: uuidv4 } = require("uuid");
 // Upload to S3
 const uploadToS3 = (fileBuffer, fileName, folder = "cars") => {
   const params = {
-    Bucket: "florestawud-assets",
+    Bucket: "carapprent",
     Key: `${folder}/${Date.now()}-${fileName}`,
     Body: fileBuffer,
   };
-
   return s3.upload(params).promise();
 };
 
