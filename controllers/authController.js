@@ -105,8 +105,8 @@ exports.verifyOtp = async (req, res) => {
       // New user → register
       const id = uuidv4();
       await db.execute(
-        "INSERT INTO users (id, phoneNumber, isVerified, role) VALUES (?, ?, ?, ?)",
-        [id, phoneNumber, 1, "USER"]
+        "INSERT INTO users (id, phoneNumber, role) VALUES (?, ?, ?)",
+        [id, phoneNumber, "USER"]
       );
       user = { id, phoneNumber, role: "USER" };
     } else {
