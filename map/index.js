@@ -107,7 +107,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/test", (req, res) => {
-  res.json({ success: true, message: "Backend API is responding!" });
+  res.json({ success: true, message: "Backend API is respodnding!" });
 });
 
 
