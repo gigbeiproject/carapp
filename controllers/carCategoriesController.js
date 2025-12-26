@@ -67,7 +67,8 @@ exports.getCarsWithCategory = async (req, res) => {
       FROM cars
       LEFT JOIN car_categories ON cars.carCategoryId = car_categories.id
       LEFT JOIN car_images ON cars.id = car_images.carId
-      WHERE 1=1
+      WHERE cars.carApprovalStatus = 'APPROVED'
+        AND cars.carEnabled = 1
     `;
 
     const params = [];
@@ -84,7 +85,7 @@ exports.getCarsWithCategory = async (req, res) => {
 
     const [rows] = await pool.query(query, params);
 
-    // Group images under each car
+    // Group images per car
     const carsMap = {};
 
     rows.forEach(row => {
@@ -127,11 +128,9 @@ exports.getCarsWithCategory = async (req, res) => {
       }
     });
 
-    const finalData = Object.values(carsMap);
-
     res.status(200).json({
       success: true,
-      data: finalData
+      data: Object.values(carsMap)
     });
 
   } catch (err) {
@@ -143,5 +142,6 @@ exports.getCarsWithCategory = async (req, res) => {
     });
   }
 };
+
 
 
