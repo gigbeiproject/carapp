@@ -100,7 +100,7 @@ const verifyBookingPayment = async (req, res) => {
     // ✅ Verify Razorpay signature
     const body = razorpay_order_id + "|" + razorpay_payment_id;
     const expectedSignature = crypto
-      .createHmac("sha256", "TwDaASCKy0D6jAYWpS9L1SkF") // ⚠️ Replace with process.env.RAZORPAY_KEY_SECRET
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET) // ⚠️ Replace with process.env.RAZORPAY_KEY_SECRET
       .update(body.toString())
       .digest("hex");
 
