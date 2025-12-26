@@ -31,6 +31,7 @@ exports.createCarCategory = async (req, res) => {
 
 
 // get by car category id
+// get cars (NO approval status filter)
 exports.getCarsWithCategory = async (req, res) => {
   try {
     const { city, category } = req.query;
@@ -68,10 +69,12 @@ exports.getCarsWithCategory = async (req, res) => {
       LEFT JOIN car_categories ON cars.carCategoryId = car_categories.id
       LEFT JOIN car_images ON cars.id = car_images.carId
       WHERE cars.carApprovalStatus = 'APPROVED'
-        AND cars.carEnabled = 1
     `;
 
     const params = [];
+
+    // (Optional but recommended)
+    // query += " AND cars.carEnabled = 1";
 
     if (city) {
       query += " AND cars.city LIKE ?";
@@ -142,6 +145,8 @@ exports.getCarsWithCategory = async (req, res) => {
     });
   }
 };
+
+
 
 
 
