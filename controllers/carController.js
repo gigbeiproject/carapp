@@ -20,64 +20,121 @@ exports.createListing = async (req, res) => {
     const carId = uuidv4();
     const userId = req.user.id; // from JWT middleware
 
-    // Parse carData (JSON string from multipart/form-data)
+    // Parse carData JSON (from multipart/form-data)
+    if (!req.body.carData) {
+      throw new Error("carData is required");
+    }
+
     const carData = JSON.parse(req.body.carData);
 
-    // Destructure fields with default carCategoryId = null if not provided
- const {
-  title,
-  city,
-  pricePerHour,
-  securityDeposit = 0,
-  seats,
-  doors,
-  luggageCapacity,
-  fuelType,
-  transmissionType,
-  carLocation,
-  carCategoryId,
-  lat,
-  long,
-  driverAvailable = false,
-  pickupDropAvailable = false,
-  activeFastag = true,   // ✅ ADD THIS
-  carFeatures = [],
-} = carData;
+    // Destructure & defaults
+    const {
+      title,
+      numberPlate,
+      city,
+      pricePerHour,
+      securityDeposit = 0,
+      seats,
+      doors,
+      luggageCapacity,
+      fuelType,
+      transmissionType,
+      carLocation,
+      carCategoryId = null,
+      lat,
+      long,
+      driverAvailable = false,
+      pickupDropAvailable = false,
+      activeFastag = true,
+      carFeatures = [],
+    } = carData;
 
+    // Basic validation
+    if (
+      !title ||
+      !numberPlate ||
+      !city ||
+      !pricePerHour ||
+      !seats ||
+      !doors ||
+      !fuelType ||
+      !transmissionType ||
+      !carLocation ||
+      lat === undefined ||
+      long === undefined
+    ) {
+      throw new Error("Missing required car fields");
+    }
 
-    // ✅ Insert into cars table including the new column
+    // ✅ INSERT INTO cars (MATCHES TABLE EXACTLY)
     await connection.execute(
-      `INSERT INTO cars 
-      (id, userId, title, city, pricePerHour, securityDeposit, seats, doors, luggageCapacity, fuelType, transmissionType, carLocation, carCategoryId, lat, lng, driverAvailable, pickupDropAvailable, activeFastag)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-   [
-  carId,
-  userId,
-  title,
-  city,
-  pricePerHour,
-  securityDeposit,
-  seats,
-  doors,
-  luggageCapacity,
-  fuelType,
-  transmissionType,
-  carLocation,
-  carCategoryId,
-  lat,
-  long,
-  driverAvailable,
-  pickupDropAvailable,
-  activeFastag,   // ✅ BOOLEAN (true / false)
-]
-
-
+      `INSERT INTO cars (
+        id,
+        userId,
+        title,
+        numberPlate,
+        city,
+        pricePerHour,
+        securityDeposit,
+        seats,
+        doors,
+        luggageCapacity,
+        fuelType,
+        transmissionType,
+        carLocation,
+        carCategoryId,
+        lat,
+        lng,
+        driverAvailable,
+        pickupDropAvailable,
+        createdAt,
+        updatedAt,
+        carApprovalStatus,
+        repairMode,
+        carEnabled,
+        activeFastag
+      ) VALUES (
+        ?,?,?,?,?,?,?,?,?,?,
+        ?,?,?,?,?,?,
+        ?,?,
+        NOW(), NOW(),
+        'PENDING',
+        0,
+        1,
+        ?
+      )`,
+      [
+        carId,
+        userId,
+        title,
+        numberPlate,
+        city,
+        pricePerHour,
+        securityDeposit,
+        seats,
+        doors,
+        luggageCapacity || 0,
+        fuelType,
+        transmissionType,
+        carLocation,
+        carCategoryId,
+        lat,
+        long,
+        driverAvailable,
+        pickupDropAvailable,
+        activeFastag
+      ]
     );
 
-    // Upload Car Images (optional)
+    // ✅ Upload car images
     if (req.files && req.files.carImages) {
-      for (let file of req.files.carImages) {
-        const upload = await uploadToS3(file.buffer, file.originalname, "car-images");
+      for (const file of req.files.carImages) {
+        const upload = await uploadToS3(
+          file.buffer,
+          file.originalname,
+          "car-images"
+        );
+
         await connection.execute(
           `INSERT INTO car_images (carId, imagePath) VALUES (?, ?)`,
           [carId, upload.Location]
@@ -85,15 +142,22 @@ exports.createListing = async (req, res) => {
       }
     }
 
-    // Upload Documents (optional)
+    // ✅ Upload documents
     const docTypes = ["rc", "insurance", "pollution", "aadhar", "license", "video"];
+
     if (req.files) {
-      for (let type of docTypes) {
+      for (const type of docTypes) {
         if (req.files[type]) {
-          for (let file of req.files[type]) {
-            const upload = await uploadToS3(file.buffer, file.originalname, "car-documents");
+          for (const file of req.files[type]) {
+            const upload = await uploadToS3(
+              file.buffer,
+              file.originalname,
+              "car-documents"
+            );
+
             await connection.execute(
-              `INSERT INTO car_documents (carId, type, filePath) VALUES (?, ?, ?)`,
+              `INSERT INTO car_documents (carId, type, filePath)
+               VALUES (?, ?, ?)`,
               [carId, type, upload.Location]
             );
           }
@@ -101,9 +165,9 @@ exports.createListing = async (req, res) => {
       }
     }
 
-    // Insert Car Features (optional)
-    if (carFeatures.length > 0) {
-      for (let feature of carFeatures) {
+    // ✅ Insert car features
+    if (Array.isArray(carFeatures) && carFeatures.length > 0) {
+      for (const feature of carFeatures) {
         await connection.execute(
           `INSERT INTO car_features (carId, feature) VALUES (?, ?)`,
           [carId, feature]
@@ -112,15 +176,22 @@ exports.createListing = async (req, res) => {
     }
 
     await connection.commit();
-    res
-      .status(201)
-      .json({ success: true, message: "Car listing created successfully", carId });
-  } catch (err) {
+
+    return res.status(201).json({
+      success: true,
+      message: "Car listing created successfully",
+      carId,
+    });
+
+  } catch (error) {
     await connection.rollback();
-    console.error("Error creating listing:", err);
-    res
-      .status(500)
-      .json({ success: false, message: "Error creating car listing", error: err.message });
+    console.error("Error creating listing:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error creating car listing",
+      error: error.message,
+    });
   } finally {
     connection.release();
   }
