@@ -24,49 +24,54 @@ exports.createListing = async (req, res) => {
     const carData = JSON.parse(req.body.carData);
 
     // Destructure fields with default carCategoryId = null if not provided
-    const {
-      title,
-      city,
-      pricePerHour,
-      securityDeposit = 0, // ✅ added field
-      seats,
-      doors,
-      luggageCapacity,
-      fuelType,
-      transmissionType,
-      carLocation,
-      carCategoryId, // optional
-      lat,
-      long,
-      driverAvailable = false,
-      pickupDropAvailable = false,
-      carFeatures = [],
-    } = carData;
+ const {
+  title,
+  city,
+  pricePerHour,
+  securityDeposit = 0,
+  seats,
+  doors,
+  luggageCapacity,
+  fuelType,
+  transmissionType,
+  carLocation,
+  carCategoryId,
+  lat,
+  long,
+  driverAvailable = false,
+  pickupDropAvailable = false,
+  activeFastag = true,   // ✅ ADD THIS
+  carFeatures = [],
+} = carData;
+
 
     // ✅ Insert into cars table including the new column
     await connection.execute(
       `INSERT INTO cars 
-      (id, userId, title, city, pricePerHour, securityDeposit, seats, doors, luggageCapacity, fuelType, transmissionType, carLocation, carCategoryId, lat, lng, driverAvailable, pickupDropAvailable)
+      (id, userId, title, city, pricePerHour, securityDeposit, seats, doors, luggageCapacity, fuelType, transmissionType, carLocation, carCategoryId, lat, lng, driverAvailable, pickupDropAvailable, activeFastag)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        carId,
-        userId,
-        title,
-        city,
-        pricePerHour,
-        securityDeposit, // ✅ new value added here
-        seats,
-        doors,
-        luggageCapacity,
-        fuelType,
-        transmissionType,
-        carLocation,
-        carCategoryId,
-        lat,
-        long,
-        driverAvailable,
-        pickupDropAvailable,
-      ]
+   [
+  carId,
+  userId,
+  title,
+  city,
+  pricePerHour,
+  securityDeposit,
+  seats,
+  doors,
+  luggageCapacity,
+  fuelType,
+  transmissionType,
+  carLocation,
+  carCategoryId,
+  lat,
+  long,
+  driverAvailable,
+  pickupDropAvailable,
+  activeFastag,   // ✅ BOOLEAN (true / false)
+]
+
+
     );
 
     // Upload Car Images (optional)
