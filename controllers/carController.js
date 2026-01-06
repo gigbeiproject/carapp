@@ -18,16 +18,14 @@ exports.createListing = async (req, res) => {
 
   try {
     const carId = uuidv4();
-    const userId = req.user.id; // from JWT middleware
+    const userId = req.user.id;
 
-    // Parse carData JSON (from multipart/form-data)
     if (!req.body.carData) {
       throw new Error("carData is required");
     }
 
     const carData = JSON.parse(req.body.carData);
 
-    // Destructure & defaults
     const {
       title,
       numberPlate,
@@ -36,7 +34,7 @@ exports.createListing = async (req, res) => {
       securityDeposit = 0,
       seats,
       doors,
-      luggageCapacity,
+      luggageCapacity = 0,
       fuelType,
       transmissionType,
       carLocation,
@@ -49,7 +47,7 @@ exports.createListing = async (req, res) => {
       carFeatures = [],
     } = carData;
 
-    // Basic validation
+    // 🔹 Validation
     if (
       !title ||
       !numberPlate ||
@@ -66,10 +64,24 @@ exports.createListing = async (req, res) => {
       throw new Error("Missing required car fields");
     }
 
-    // ✅ INSERT INTO cars (MATCHES TABLE EXACTLY)
+    // 🔹 Insert car
     await connection.execute(
       `INSERT INTO cars (
-        id,
+        id, userId, title, numberPlate, city, pricePerHour,
+        securityDeposit, seats, doors, luggageCapacity,
+        fuelType, transmissionType, carLocation, carCategoryId,
+        lat, lng, driverAvailable, pickupDropAvailable,
+        createdAt, updatedAt, carApprovalStatus, repairMode,
+        carEnabled, activeFastag
+      ) VALUES (
+        ?,?,?,?,?,?,
+        ?,?,?,?,
+        ?,?,?,?,
+        ?,?,?,?,
+        NOW(), NOW(), 'PENDING', 0, 1, ?
+      )`,
+      [
+        carId,
         userId,
         title,
         numberPlate,
@@ -84,95 +96,56 @@ exports.createListing = async (req, res) => {
         carLocation,
         carCategoryId,
         lat,
-        lng,
-        driverAvailable,
-        pickupDropAvailable,
-        createdAt,
-        updatedAt,
-        carApprovalStatus,
-        repairMode,
-        carEnabled,
-        activeFastag
-      ) VALUES (
-        ?,?,?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,
-        ?,?,
-        NOW(), NOW(),
-        'PENDING',
-        0,
-        1,
-        ?
-      )`,
-      [
-        carId,
-        userId,
-        title,
-        numberPlate,
-        city,
-        pricePerHour,
-        securityDeposit,
-        seats,
-        doors,
-        luggageCapacity || 0,
-        fuelType,
-        transmissionType,
-        carLocation,
-        carCategoryId,
-        lat,
         long,
         driverAvailable,
         pickupDropAvailable,
-        activeFastag
+        activeFastag,
       ]
     );
 
-    // ✅ Upload car images
-    if (req.files && req.files.carImages) {
-      for (const file of req.files.carImages) {
-        const upload = await uploadToS3(
-          file.buffer,
-          file.originalname,
-          "car-images"
-        );
+    // 🔹 Upload car images
+    if (req.files?.carImages) {
+      const images = Array.isArray(req.files.carImages)
+        ? req.files.carImages
+        : [req.files.carImages];
+
+      for (const file of images) {
+        const imageUrl = await uploadToS3(file, "car-images");
 
         await connection.execute(
           `INSERT INTO car_images (carId, imagePath) VALUES (?, ?)`,
-          [carId, upload.Location]
+          [carId, imageUrl]
         );
       }
     }
 
-    // ✅ Upload documents
+    // 🔹 Upload documents
     const docTypes = ["rc", "insurance", "pollution", "aadhar", "license", "video"];
 
-    if (req.files) {
-      for (const type of docTypes) {
-        if (req.files[type]) {
-          for (const file of req.files[type]) {
-            const upload = await uploadToS3(
-              file.buffer,
-              file.originalname,
-              "car-documents"
-            );
+    for (const type of docTypes) {
+      if (req.files?.[type]) {
+        const docs = Array.isArray(req.files[type])
+          ? req.files[type]
+          : [req.files[type]];
 
-            await connection.execute(
-              `INSERT INTO car_documents (carId, type, filePath)
-               VALUES (?, ?, ?)`,
-              [carId, type, upload.Location]
-            );
-          }
+        for (const file of docs) {
+          const docUrl = await uploadToS3(file, "car-documents");
+
+          await connection.execute(
+            `INSERT INTO car_documents (carId, type, filePath)
+             VALUES (?, ?, ?)`,
+            [carId, type, docUrl]
+          );
         }
       }
     }
 
-    // ✅ Insert car features
-    if (Array.isArray(carFeatures) && carFeatures.length > 0) {
-      for (const feature of carFeatures) {
-        await connection.execute(
-          `INSERT INTO car_features (carId, feature) VALUES (?, ?)`,
-          [carId, feature]
-        );
-      }
+    // 🔹 Insert features
+    for (const feature of carFeatures) {
+      await connection.execute(
+        `INSERT INTO car_features (carId, feature) VALUES (?, ?)`,
+        [carId, feature]
+      );
     }
 
     await connection.commit();
