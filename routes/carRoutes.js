@@ -11,15 +11,16 @@ router.post(
   protect,
   upload.fields([
     { name: "carImages", maxCount: 10 },
-    { name: "rc", maxCount: 5 },
-    { name: "insurance", maxCount: 5 },
-    { name: "pollution", maxCount: 5 },
-    { name: "aadhar", maxCount: 5 },
-    { name: "license", maxCount: 5 },
+    { name: "rc", maxCount: 2 },
+    { name: "insurance", maxCount: 2 },
+    { name: "pollution", maxCount: 2 },
+    { name: "aadhar", maxCount: 2 },
+    { name: "license", maxCount: 2 },
     { name: "video", maxCount: 1 },
   ]),
   createListing
 );
+
 
 
 router.get("/", getAllCars); 
