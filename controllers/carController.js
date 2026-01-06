@@ -17,12 +17,15 @@ exports.createListing = async (req, res) => {
   await connection.beginTransaction();
 
   try {
-    const carId = uuidv4();
-    const userId = req.user.id;
+    console.log("BODY:", req.body);
+    console.log("FILES:", req.files);
 
     if (!req.body.carData) {
       throw new Error("carData is required");
     }
+
+    const carId = uuidv4();
+    const userId = req.user.id;
 
     const carData = JSON.parse(req.body.carData);
 
@@ -47,7 +50,6 @@ exports.createListing = async (req, res) => {
       carFeatures = [],
     } = carData;
 
-    // 🔹 Validation
     if (
       !title ||
       !numberPlate ||
@@ -64,21 +66,22 @@ exports.createListing = async (req, res) => {
       throw new Error("Missing required car fields");
     }
 
-    // 🔹 Insert car
+    // Insert car
     await connection.execute(
       `INSERT INTO cars (
         id, userId, title, numberPlate, city, pricePerHour,
         securityDeposit, seats, doors, luggageCapacity,
         fuelType, transmissionType, carLocation, carCategoryId,
         lat, lng, driverAvailable, pickupDropAvailable,
-        createdAt, updatedAt, carApprovalStatus, repairMode,
-        carEnabled, activeFastag
+        createdAt, updatedAt, carApprovalStatus,
+        repairMode, carEnabled, activeFastag
       ) VALUES (
         ?,?,?,?,?,?,
         ?,?,?,?,
         ?,?,?,?,
         ?,?,?,?,
-        NOW(), NOW(), 'PENDING', 0, 1, ?
+        NOW(), NOW(), 'PENDING',
+        0, 1, ?
       )`,
       [
         carId,
@@ -103,47 +106,35 @@ exports.createListing = async (req, res) => {
       ]
     );
 
-    // 🔹 Upload car images
+    // Upload images
     if (req.files?.carImages) {
-      const images = Array.isArray(req.files.carImages)
-        ? req.files.carImages
-        : [req.files.carImages];
-
-      for (const file of images) {
+      for (const file of req.files.carImages) {
         const imageUrl = await uploadToS3(file, "car-images");
-
         await connection.execute(
-          `INSERT INTO car_images (carId, imagePath) VALUES (?, ?)`,
+          "INSERT INTO car_images (carId, imagePath) VALUES (?, ?)",
           [carId, imageUrl]
         );
       }
     }
 
-    // 🔹 Upload documents
+    // Upload documents
     const docTypes = ["rc", "insurance", "pollution", "aadhar", "license", "video"];
-
     for (const type of docTypes) {
       if (req.files?.[type]) {
-        const docs = Array.isArray(req.files[type])
-          ? req.files[type]
-          : [req.files[type]];
-
-        for (const file of docs) {
+        for (const file of req.files[type]) {
           const docUrl = await uploadToS3(file, "car-documents");
-
           await connection.execute(
-            `INSERT INTO car_documents (carId, type, filePath)
-             VALUES (?, ?, ?)`,
+            "INSERT INTO car_documents (carId, type, filePath) VALUES (?, ?, ?)",
             [carId, type, docUrl]
           );
         }
       }
     }
 
-    // 🔹 Insert features
+    // Insert features
     for (const feature of carFeatures) {
       await connection.execute(
-        `INSERT INTO car_features (carId, feature) VALUES (?, ?)`,
+        "INSERT INTO car_features (carId, feature) VALUES (?, ?)",
         [carId, feature]
       );
     }
@@ -158,7 +149,7 @@ exports.createListing = async (req, res) => {
 
   } catch (error) {
     await connection.rollback();
-    console.error("Error creating listing:", error);
+    console.error("Create listing error:", error);
 
     return res.status(500).json({
       success: false,
