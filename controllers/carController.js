@@ -1,16 +1,9 @@
 const db = require("../config/db");
 const s3 = require("../config/s3");
 const { v4: uuidv4 } = require("uuid");
+const uploadToS3 = require("../config/uploadToS3");
 
 // Upload to S3
-const uploadToS3 = (fileBuffer, fileName, folder = "cars") => {
-  const params = {
-    Bucket: "carapprent",
-    Key: `${folder}/${Date.now()}-${fileName}`,
-    Body: fileBuffer,
-  };
-  return s3.upload(params).promise();
-};
 
 exports.createListing = async (req, res) => {
   const connection = await db.getConnection();
@@ -20,14 +13,36 @@ exports.createListing = async (req, res) => {
     console.log("BODY:", req.body);
     console.log("FILES:", req.files);
 
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
     if (!req.body.carData) {
-      throw new Error("carData is required");
+      return res.status(400).json({
+        success: false,
+        message: "carData is required",
+      });
+    }
+
+    // ✅ SAFE JSON PARSE
+    let carData;
+    try {
+      carData =
+        typeof req.body.carData === "string"
+          ? JSON.parse(req.body.carData)
+          : req.body.carData;
+    } catch {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid carData JSON",
+      });
     }
 
     const carId = uuidv4();
-    const userId = req.user.id;
-
-    const carData = JSON.parse(req.body.carData);
 
     const {
       title,
@@ -63,10 +78,13 @@ exports.createListing = async (req, res) => {
       lat === undefined ||
       long === undefined
     ) {
-      throw new Error("Missing required car fields");
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
     }
 
-    // Insert car
+    // ✅ INSERT CAR
     await connection.execute(
       `INSERT INTO cars (
         id, userId, title, numberPlate, city, pricePerHour,
@@ -106,9 +124,10 @@ exports.createListing = async (req, res) => {
       ]
     );
 
-    // Upload images
+    // ✅ UPLOAD CAR IMAGES
     if (req.files?.carImages) {
       for (const file of req.files.carImages) {
+        if (!file.buffer) continue;
         const imageUrl = await uploadToS3(file, "car-images");
         await connection.execute(
           "INSERT INTO car_images (carId, imagePath) VALUES (?, ?)",
@@ -117,26 +136,32 @@ exports.createListing = async (req, res) => {
       }
     }
 
-    // Upload documents
+    // ✅ UPLOAD DOCUMENTS & VIDEO
     const docTypes = ["rc", "insurance", "pollution", "aadhar", "license", "video"];
     for (const type of docTypes) {
-      if (req.files?.[type]) {
-        for (const file of req.files[type]) {
-          const docUrl = await uploadToS3(file, "car-documents");
-          await connection.execute(
-            "INSERT INTO car_documents (carId, type, filePath) VALUES (?, ?, ?)",
-            [carId, type, docUrl]
-          );
-        }
+      if (!req.files?.[type]) continue;
+
+      for (const file of req.files[type]) {
+        if (!file.buffer) continue;
+
+        if (type === "video" && !file.mimetype.startsWith("video/")) continue;
+
+        const docUrl = await uploadToS3(file, "car-documents");
+        await connection.execute(
+          "INSERT INTO car_documents (carId, type, filePath) VALUES (?, ?, ?)",
+          [carId, type, docUrl]
+        );
       }
     }
 
-    // Insert features
-    for (const feature of carFeatures) {
-      await connection.execute(
-        "INSERT INTO car_features (carId, feature) VALUES (?, ?)",
-        [carId, feature]
-      );
+    // ✅ FEATURES
+    if (Array.isArray(carFeatures)) {
+      for (const feature of carFeatures) {
+        await connection.execute(
+          "INSERT INTO car_features (carId, feature) VALUES (?, ?)",
+          [carId, feature]
+        );
+      }
     }
 
     await connection.commit();
@@ -160,6 +185,7 @@ exports.createListing = async (req, res) => {
     connection.release();
   }
 };
+
 
 // get all permit
 exports.getAllCars = async (req, res) => {
