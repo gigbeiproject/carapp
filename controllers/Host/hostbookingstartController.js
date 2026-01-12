@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 // ✅ Helper: Upload file to S3
 const uploadToS3 = async (fileBuffer, fileName, folder = "bookings") => {
   const params = {
-    Bucket: "florestawud-assets",
+    Bucket: "carapprent",
     Key: `${folder}/${Date.now()}-${uuidv4()}-${fileName}`,
     Body: fileBuffer,
   };
