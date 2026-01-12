@@ -190,7 +190,6 @@ exports.createListing = async (req, res) => {
 // get all permit
 exports.getAllCars = async (req, res) => {
   try {
-    // Fetch only APPROVED cars along with owner details
     const [cars] = await db.execute(
       `SELECT c.*, u.name AS HostName, u.phoneNumber AS ownerPhone
        FROM cars c
@@ -199,59 +198,56 @@ exports.getAllCars = async (req, res) => {
     );
 
     for (const car of cars) {
-      // Fetch car images
       const [images] = await db.execute(
         "SELECT imagePath FROM car_images WHERE carId = ?",
         [car.id]
       );
 
-      // Fetch car documents
       const [documents] = await db.execute(
         "SELECT type, filePath FROM car_documents WHERE carId = ?",
         [car.id]
       );
 
-      // Fetch car features
       const [features] = await db.execute(
         "SELECT feature FROM car_features WHERE carId = ?",
         [car.id]
       );
 
-      // Fetch average rating and total reviews
       const [ratingResult] = await db.execute(
-        "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
+        `SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews
+         FROM car_reviews WHERE carId = ?`,
         [car.id]
       );
 
-      // Fetch total bookings
       const [bookingResult] = await db.execute(
         "SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?",
         [car.id]
       );
 
-      // Attach related data
-      car.images = images.map((i) => i.imagePath);
+      // SAFE conversion
+      const avgRatingRaw = ratingResult[0].avgRating;
+
+      car.images = images.map(i => i.imagePath);
       car.documents = documents;
-      car.features = features.map((f) => f.feature);
-      car.avgRating = ratingResult[0].avgRating
-        ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+      car.features = features.map(f => f.feature);
+      car.avgRating = avgRatingRaw
+        ? Number(parseFloat(avgRatingRaw).toFixed(1))
         : 0;
-      car.totalReviews = ratingResult[0].totalReviews;
-      car.bookingCount = bookingResult[0].bookingCount;
+      car.totalReviews = ratingResult[0].totalReviews || 0;
+      car.bookingCount = bookingResult[0].bookingCount || 0;
     }
 
     res.json({ success: true, data: cars });
   } catch (err) {
     console.error("Error fetching cars:", err);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error fetching cars",
-        error: err.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Error fetching cars",
+      error: err.message,
+    });
   }
 };
+
 
 
 // get all product detiles page 
@@ -372,7 +368,6 @@ exports.getCarById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Fetch car + host details + host profilePic + new ID/DL images
     const [cars] = await db.execute(
       `SELECT 
           c.*, 
@@ -395,45 +390,47 @@ exports.getCarById = async (req, res) => {
 
     const car = cars[0];
 
-    // Fetch images, documents, features
     const [images] = await db.execute(
       "SELECT imagePath FROM car_images WHERE carId = ?",
       [id]
     );
+
     const [documents] = await db.execute(
       "SELECT type, filePath FROM car_documents WHERE carId = ?",
       [id]
     );
+
     const [features] = await db.execute(
       "SELECT feature FROM car_features WHERE carId = ?",
       [id]
     );
 
-    // Fetch rating summary
     const [ratingResult] = await db.execute(
-      "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
+      `SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews
+       FROM car_reviews WHERE carId = ?`,
       [id]
     );
 
-    // Total bookings count
     const [bookingResult] = await db.execute(
       "SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?",
       [id]
     );
 
-    // Assign values
-    car.images = images.map((i) => i.imagePath);
+    // SAFE numeric handling
+    const avgRatingRaw = ratingResult[0].avgRating;
+
+    car.images = images.map(i => i.imagePath);
     car.documents = documents;
-    car.features = features.map((f) => f.feature);
-    car.avgRating = ratingResult[0].avgRating
-      ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+    car.features = features.map(f => f.feature);
+    car.avgRating = avgRatingRaw
+      ? Number(parseFloat(avgRatingRaw).toFixed(1))
       : 0;
-    car.totalReviews = ratingResult[0].totalReviews;
-    car.bookingCount = bookingResult[0].bookingCount;
+    car.totalReviews = ratingResult[0].totalReviews || 0;
+    car.bookingCount = bookingResult[0].bookingCount || 0;
 
     res.json({ success: true, data: car });
   } catch (err) {
-    console.error(err);
+    console.error("Error fetching car:", err);
     res.status(500).json({
       success: false,
       message: "Error fetching car",
@@ -441,6 +438,7 @@ exports.getCarById = async (req, res) => {
     });
   }
 };
+
 
 
 // ================================
