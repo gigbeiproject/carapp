@@ -103,7 +103,7 @@ app.use("/api/notification", notifications);
 app.use("/admin", UserRouteadmin);
 
 app.get("/", (req, res) => {
-  res.send("Backend is running by chandannnncn !");
+  res.send("Backend is running by chandannnncnn !");
 });
 
 app.get("/test", (req, res) => {
