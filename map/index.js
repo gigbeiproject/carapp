@@ -41,13 +41,13 @@ app.use(express.urlencoded({ extended: true, limit: "500mb" }));
 
 
 app.get('/', (req, res) => {
-  res.send('Server is working map 144');
+  res.send('Server is working map 144s');
 });
 
 
 
 
-app.use('/api/auth', authRoutes);
+app.use('/api/    ', authRoutes);
 app.use('/api/auth', authRoutes);
 
 app.use('/api/car', carRoutes);
