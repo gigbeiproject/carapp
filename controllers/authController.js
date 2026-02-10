@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const twilio = require("twilio");
 const s3 = require("../config/s3"); // your S3 upload config
+const axios = require("axios");
 
 require("dotenv").config({ path: "../.env" }); // if .env is in parent folder
 
@@ -27,6 +28,56 @@ const generateOTP = () =>
  */
 
 
+// exports.sendOtp = async (req, res) => {
+//   const { phoneNumber } = req.body;
+
+//   if (!phoneNumber) {
+//     return res.status(400).json({ error: "Phone number is required" });
+//   }
+
+//   try {
+//     let otp;
+
+//     // 🧪 TEST MODE (Fixed OTP Only for Developer)
+//     if (phoneNumber === "+911111111111") {
+//       otp = "1234";
+//     } else {
+//       otp = generateOTP();
+//     }
+
+//     // 🚫 Do NOT send SMS for test number
+//     if (phoneNumber !== "+911111111111") {
+//       await client.messages.create({
+//         body: `Your verification code is ${otp}`,
+//         from: process.env.TWILIO_PHONE_NUMBER,
+//         to: phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`,
+//       });
+//     }
+
+//     // ✅ Save OTP in DB
+//     await db.execute(
+//       `INSERT INTO otps (phoneNumber, otp, expiresAt)
+//        VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))
+//        ON DUPLICATE KEY UPDATE otp = VALUES(otp), expiresAt = VALUES(expiresAt)`,
+//       [phoneNumber, otp]
+//     );
+
+//     res.json({
+//       success: true,
+//       message:
+//         phoneNumber === "1111111111"
+//           ? "OTP generated in test mode"
+//           : "OTP sent successfully",
+//     });
+//   } catch (error) {
+//     console.error("Send OTP error:", error);
+//     res.status(500).json({ error: "Failed to send OTP" });
+//   }
+// };
+
+
+
+
 exports.sendOtp = async (req, res) => {
   const { phoneNumber } = req.body;
 
@@ -37,19 +88,32 @@ exports.sendOtp = async (req, res) => {
   try {
     let otp;
 
-    // 🧪 TEST MODE (Fixed OTP Only for Developer)
-    if (phoneNumber === "+911111111111") {
+    // 🧪 TEST MODE
+    if (phoneNumber === "+911111111111" || phoneNumber === "1111111111") {
       otp = "1234";
     } else {
       otp = generateOTP();
     }
 
-    // 🚫 Do NOT send SMS for test number
-    if (phoneNumber !== "+911111111111") {
-      await client.messages.create({
-        body: `Your verification code is ${otp}`,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`,
+    // 🚫 Skip SMS for test number
+    if (
+      phoneNumber !== "+911111111111" &&
+      phoneNumber !== "1111111111"
+    ) {
+      const mobile = phoneNumber.startsWith("+91")
+        ? phoneNumber.replace("+91", "")
+        : phoneNumber;
+
+      // 🔥 Fast2SMS DLT API call
+      await axios.get("https://www.fast2sms.com/dev/bulkV2", {
+        params: {
+          authorization: process.env.FAST2SMS_API_KEY,
+          route: "dlt",
+          sender_id: "CARLUS",          // ✅ DLT approved sender id
+          message: "208889",            // ✅ DLT template ID
+          variables_values: otp,        // OTP replaces {#var#}
+          numbers: mobile,
+        },
       });
     }
 
@@ -64,15 +128,17 @@ exports.sendOtp = async (req, res) => {
     res.json({
       success: true,
       message:
-        phoneNumber === "1111111111"
+        phoneNumber === "1111111111" || phoneNumber === "+911111111111"
           ? "OTP generated in test mode"
           : "OTP sent successfully",
     });
   } catch (error) {
-    console.error("Send OTP error:", error);
+    console.error("Send OTP error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to send OTP" });
   }
 };
+
+
 
 
 
