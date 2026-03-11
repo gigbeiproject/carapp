@@ -11,6 +11,6 @@ const upload = multer({ storage });
 
 // ✅ Routes
 router.post("/start-booking", upload.any(), startBooking);
-router.post("/complete-booking", upload.array("files", 10), completeBooking);
+router.post("/complete-booking", upload.any(), completeBooking);
 
 module.exports = router;
