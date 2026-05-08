@@ -1,7 +1,7 @@
 // routes/booking.js
 const express = require("express");
 const { protect } = require("../middleware/auth");
-const { createBookingOrder, verifyBookingPayment ,getUserBookings,cancelBooking,getBookingById } = require("../controllers/createbooking");
+const { createBookingOrder, verifyBookingPayment ,getUserBookings,cancelBooking,getBookingById,selfBookCar } = require("../controllers/createbooking");
 
 const router = express.Router();
 
@@ -16,5 +16,12 @@ router.get("/orders", protect, getUserBookings);
 router.get("/book/:id", protect, getBookingById);
 
 router.put("/cancel-booking/:reservationId",protect, cancelBooking); // PUT or PATCH
+
+
+
+
+// host  api this 
+
+router.post("/self-book-car", protect, selfBookCar);
 
 module.exports = router;

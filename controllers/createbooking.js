@@ -442,6 +442,181 @@ const cancelBooking = async (req, res) => {
 
 
 
-module.exports = { createBookingOrder, verifyBookingPayment, getUserBookings,cancelBooking,getBookingById };
+
+// host  api self book
+
+
+
+// ===============================
+// SELF BOOK CAR API
+// ===============================
+const selfBookCar = async (req, res) => {
+  try {
+    // ✅ Logged in owner ID
+    const userId = req.user.id;
+
+    // ✅ Request body
+    const {
+      carId,
+      startDate,
+      endDate,
+      bookingStartDateTime,
+      bookingEndDateTime,
+    } = req.body;
+
+    // ===============================
+    // VALIDATION
+    // ===============================
+    if (!carId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "carId, startDate and endDate are required",
+      });
+    }
+
+    // ===============================
+    // CHECK CAR EXISTS
+    // ===============================
+    const [carRows] = await db.query(
+      `
+      SELECT id, userId, title
+      FROM cars
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [carId]
+    );
+
+    if (carRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Car not found",
+      });
+    }
+
+    const car = carRows[0];
+
+    // ===============================
+    // ONLY OWNER CAN SELF BOOK
+    // ===============================
+    if (car.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You can self-book only your own car",
+      });
+    }
+
+    // ===============================
+    // CHECK DATE/TIME OVERLAP
+    // ===============================
+    const [existingBookings] = await db.query(
+      `
+      SELECT id, status
+      FROM reservations
+      WHERE carId = ?
+      AND status IN (
+        'PENDING',
+        'CONFIRMED',
+        'START',
+        'SELFBOOK'
+      )
+      AND (
+        (? BETWEEN startDate AND endDate)
+        OR
+        (? BETWEEN startDate AND endDate)
+        OR
+        (startDate BETWEEN ? AND ?)
+      )
+      `,
+      [
+        carId,
+        startDate,
+        endDate,
+        startDate,
+        endDate,
+      ]
+    );
+
+    // ===============================
+    // IF ALREADY BOOKED
+    // ===============================
+    if (existingBookings.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Car already booked/self-booked for selected dates",
+      });
+    }
+
+    // ===============================
+    // CREATE BOOKING ID
+    // ===============================
+    const bookingId = uuidv4();
+
+    // ===============================
+    // INSERT SELF BOOKING
+    // ===============================
+    await db.query(
+      `
+      INSERT INTO reservations (
+        id,
+        userId,
+        carId,
+        startDate,
+        endDate,
+        bookingStartDateTime,
+        bookingEndDateTime,
+        amount,
+        totalHours,
+        status,
+        settlementStatus,
+        hostId,
+        createdAt,
+        updatedAt
+      )
+      VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
+      )
+      `,
+      [
+        bookingId,
+        userId,
+        carId,
+        startDate,
+        endDate,
+        bookingStartDateTime || startDate,
+        bookingEndDateTime || endDate,
+        0,
+        0,
+        "SELFBOOK",
+        "PENDING",
+        userId,
+      ]
+    );
+
+    // ===============================
+    // SUCCESS RESPONSE
+    // ===============================
+    return res.status(200).json({
+      success: true,
+      message: "Car self-booked successfully",
+      bookingId,
+    });
+
+  } catch (err) {
+    console.error("Self booking error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: err.message,
+    });
+  }
+};
+
+
+
+
+module.exports = { createBookingOrder, verifyBookingPayment, getUserBookings,cancelBooking,getBookingById,selfBookCar };
 
 
