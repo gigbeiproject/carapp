@@ -431,6 +431,7 @@ exports.getCarsByUserId = async (req, res) => {
 
     // Enrich each car with related info
     for (const car of cars) {
+
       // Images
       const [images] = await db.execute(
         "SELECT imagePath FROM car_images WHERE carId = ?",
@@ -451,7 +452,11 @@ exports.getCarsByUserId = async (req, res) => {
 
       // Ratings
       const [ratingResult] = await db.execute(
-        "SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?",
+        `SELECT 
+          AVG(rating) AS avgRating, 
+          COUNT(*) AS totalReviews 
+         FROM car_reviews 
+         WHERE carId = ?`,
         [car.id]
       );
 
@@ -462,13 +467,18 @@ exports.getCarsByUserId = async (req, res) => {
       );
 
       car.images = images.map((i) => i.imagePath);
+
       car.documents = documents;
+
       car.features = features.map((f) => f.feature);
+
       car.avgRating = ratingResult[0].avgRating
-        ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+        ? parseFloat(Number(ratingResult[0].avgRating).toFixed(1))
         : 0;
-      car.totalReviews = ratingResult[0].totalReviews;
-      car.bookingCount = bookingResult[0].bookingCount;
+
+      car.totalReviews = Number(ratingResult[0].totalReviews) || 0;
+
+      car.bookingCount = Number(bookingResult[0].bookingCount) || 0;
     }
 
     res.status(200).json({
@@ -476,8 +486,10 @@ exports.getCarsByUserId = async (req, res) => {
       totalCars: cars.length,
       data: cars,
     });
+
   } catch (err) {
     console.error("Error fetching cars by userId:", err);
+
     res.status(500).json({
       success: false,
       message: "Error fetching cars by userId",
