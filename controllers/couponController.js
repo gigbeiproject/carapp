@@ -46,11 +46,27 @@ exports.createCoupon = async (req, res) => {
 // ✅ Get All Coupons (Admin)
 exports.getAllCoupons = async (req, res) => {
   try {
-    const [coupons] = await db.execute("SELECT * FROM coupons ORDER BY createdAt DESC");
-    res.status(200).json({ success: true, data: coupons });
+    const [coupons] = await db.execute(`
+      SELECT * 
+      FROM coupons
+      WHERE 
+        CURDATE() BETWEEN DATE(startDate) AND DATE(endDate)
+      ORDER BY createdAt DESC
+    `);
+
+    res.status(200).json({
+      success: true,
+      data: coupons,
+    });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: "Internal Server Error", error: err.message });
+
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: err.message,
+    });
   }
 };
 

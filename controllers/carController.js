@@ -190,57 +190,181 @@ exports.createListing = async (req, res) => {
 // get all permit
 exports.getAllCars = async (req, res) => {
   try {
+
+    // =====================================
+    // GET ALL APPROVED CARS
+    // =====================================
     const [cars] = await db.execute(
-      `SELECT c.*, u.name AS HostName, u.phoneNumber AS ownerPhone
-       FROM cars c
-       JOIN users u ON c.userId = u.id
-       WHERE c.carApprovalStatus = 'APPROVED'`
+      `
+      SELECT 
+        c.*,
+        u.name AS HostName,
+        u.phoneNumber AS ownerPhone
+      FROM cars c
+      JOIN users u ON c.userId = u.id
+      WHERE c.carApprovalStatus = 'APPROVED'
+      `
     );
 
+    // =====================================
+    // LOOP ALL CARS
+    // =====================================
     for (const car of cars) {
+
+      // =====================================
+      // GET CAR IMAGES
+      // =====================================
       const [images] = await db.execute(
-        "SELECT imagePath FROM car_images WHERE carId = ?",
+        `
+        SELECT imagePath
+        FROM car_images
+        WHERE carId = ?
+        `,
         [car.id]
       );
 
+      // =====================================
+      // GET CAR DOCUMENTS
+      // =====================================
       const [documents] = await db.execute(
-        "SELECT type, filePath FROM car_documents WHERE carId = ?",
+        `
+        SELECT type, filePath
+        FROM car_documents
+        WHERE carId = ?
+        `,
         [car.id]
       );
 
+      // =====================================
+      // GET CAR FEATURES
+      // =====================================
       const [features] = await db.execute(
-        "SELECT feature FROM car_features WHERE carId = ?",
+        `
+        SELECT feature
+        FROM car_features
+        WHERE carId = ?
+        `,
         [car.id]
       );
 
+      // =====================================
+      // GET RATINGS
+      // =====================================
       const [ratingResult] = await db.execute(
-        `SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews
-         FROM car_reviews WHERE carId = ?`,
+        `
+        SELECT
+          AVG(rating) AS avgRating,
+          COUNT(*) AS totalReviews
+        FROM car_reviews
+        WHERE carId = ?
+        `,
         [car.id]
       );
 
+      // =====================================
+      // GET BOOKING COUNT
+      // =====================================
       const [bookingResult] = await db.execute(
-        "SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?",
+        `
+        SELECT COUNT(*) AS bookingCount
+        FROM reservations
+        WHERE carId = ?
+        `,
         [car.id]
       );
 
-      // SAFE conversion
+      // =====================================
+      // DEFAULT VALUES
+      // =====================================
+      car.selfBook = false;
+
+      car.freeAfter = null;
+
+      // =====================================
+      // CHECK ACTIVE SELF BOOKING
+      // =====================================
+      const [selfBooking] = await db.execute(
+        `
+        SELECT
+          id,
+          startDate,
+          endDate,
+          status
+        FROM reservations
+        WHERE carId = ?
+        AND status = 'SELFBOOK'
+        AND endDate >= NOW()
+        ORDER BY endDate ASC
+        LIMIT 1
+        `,
+        [car.id]
+      );
+
+      // =====================================
+      // IF SELF BOOK FOUND
+      // =====================================
+      if (selfBooking.length > 0) {
+
+        const booking = selfBooking[0];
+
+        const now = new Date();
+
+        const start = new Date(booking.startDate);
+
+        const end = new Date(booking.endDate);
+
+        // =====================================
+        // ACTIVE SELF BOOK
+        // =====================================
+        if (now >= start && now <= end) {
+
+          car.selfBook = true;
+
+          car.freeAfter = booking.endDate;
+
+        } else {
+
+          car.selfBook = false;
+
+          car.freeAfter = null;
+        }
+      }
+
+      // =====================================
+      // FORMAT RESPONSE
+      // =====================================
       const avgRatingRaw = ratingResult[0].avgRating;
 
-      car.images = images.map(i => i.imagePath);
+      car.images = images.map(img => img.imagePath);
+
       car.documents = documents;
+
       car.features = features.map(f => f.feature);
+
       car.avgRating = avgRatingRaw
         ? Number(parseFloat(avgRatingRaw).toFixed(1))
         : 0;
-      car.totalReviews = ratingResult[0].totalReviews || 0;
-      car.bookingCount = bookingResult[0].bookingCount || 0;
+
+      car.totalReviews =
+        ratingResult[0].totalReviews || 0;
+
+      car.bookingCount =
+        bookingResult[0].bookingCount || 0;
     }
 
-    res.json({ success: true, data: cars });
+    // =====================================
+    // FINAL RESPONSE
+    // =====================================
+    return res.json({
+      success: true,
+      data: cars,
+    });
+
   } catch (err) {
+
     console.error("Error fetching cars:", err);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Error fetching cars",
       error: err.message,
