@@ -41,7 +41,7 @@ app.use(express.urlencoded({ extended: true, limit: "500mb" }));
 
 
 app.get('/', (req, res) => {
-  res.send('Server is working map 144s');
+  res.send('Server is workings map 144s');
 });
 
 
