@@ -191,8 +191,27 @@ exports.createListing = async (req, res) => {
 exports.getAllCars = async (req, res) => {
   try {
     // =====================================
-    // 1. GET ALL APPROVED CARS
+    // 1. GET PAGINATION PARAMETERS
     // =====================================
+    const page = parseInt(req.query.page) || 1; // Default page 1
+    const limit = parseInt(req.query.limit) || 10; // Default 10 cars per page
+    const offset = (page - 1) * limit;
+
+    // =====================================
+    // 2. GET TOTAL COUNT FOR PAGINATION METADATA
+    // =====================================
+    const [countResult] = await db.execute(
+      "SELECT COUNT(*) AS totalCars FROM cars WHERE carApprovalStatus = 'APPROVED'"
+    );
+    const totalCars = countResult[0].totalCars;
+    const totalPages = Math.ceil(totalCars / limit);
+
+    // =====================================
+    // 3. GET PAGINATED APPROVED CARS
+    // =====================================
+    // Note: Using string interpolation for LIMIT and OFFSET because some MySQL 
+    // drivers have issues with parameterized queries for these specific clauses.
+    // Variables are safely parsed as integers above.
     const [cars] = await db.execute(
       `
       SELECT 
@@ -202,11 +221,12 @@ exports.getAllCars = async (req, res) => {
       FROM cars c
       JOIN users u ON c.userId = u.id
       WHERE c.carApprovalStatus = 'APPROVED'
+      LIMIT ${limit} OFFSET ${offset}
       `
     );
 
     // =====================================
-    // 2. LOOP THROUGH ALL CARS TO GET DETAILS
+    // 4. LOOP THROUGH PAGINATED CARS TO GET DETAILS
     // =====================================
     for (const car of cars) {
 
@@ -247,7 +267,7 @@ exports.getAllCars = async (req, res) => {
       );
 
       // =====================================
-      // 3. CHECK ACTIVE SELF BOOKING (EXACT LOGIC FROM getCarsByUser)
+      // 5. CHECK ACTIVE SELF BOOKING
       // =====================================
       car.selfBook = false;
       car.freeAfter = null;
@@ -273,7 +293,7 @@ exports.getAllCars = async (req, res) => {
       }
 
       // =====================================
-      // 4. FORMAT FINAL RESPONSE
+      // 6. FORMAT FINAL RESPONSE
       // =====================================
       const avgRatingRaw = ratingResult[0].avgRating;
 
@@ -287,10 +307,16 @@ exports.getAllCars = async (req, res) => {
     }
 
     // =====================================
-    // 5. SEND RESPONSE
+    // 7. SEND PAGINATED RESPONSE
     // =====================================
     return res.status(200).json({
       success: true,
+      pagination: {
+        totalCars,
+        currentPage: page,
+        totalPages,
+        limit
+      },
       data: cars,
     });
 
@@ -303,7 +329,6 @@ exports.getAllCars = async (req, res) => {
     });
   }
 };
-
 
 // get all product detiles page 
 
