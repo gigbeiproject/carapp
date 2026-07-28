@@ -131,9 +131,43 @@ exports.getCarsWithCategory = async (req, res) => {
       }
     });
 
+    // Object.values se saari mapped cars ka ek array bana liya
+    const finalCars = Object.values(carsMap);
+
+    // =====================================
+    // CHECK ACTIVE SELF BOOKING FOR EACH CAR
+    // =====================================
+    for (const car of finalCars) {
+      // Default values
+      car.selfBook = false;
+      car.freeAfter = null;
+
+      // Check current active self-booking
+      const [selfBooking] = await pool.query(
+        `
+        SELECT endDate
+        FROM reservations
+        WHERE carId = ?
+        AND status = 'SELFBOOK'
+        AND startDate <= NOW()
+        AND endDate >= NOW()
+        ORDER BY endDate ASC
+        LIMIT 1
+        `,
+        [car.id]
+      );
+
+      // Agar query result deti hai, matlab self-booking chal rahi hai
+      if (selfBooking.length > 0) {
+        car.selfBook = true;
+        car.freeAfter = selfBooking[0].endDate;
+      }
+    }
+
+    // Final response bhejein
     res.status(200).json({
       success: true,
-      data: Object.values(carsMap)
+      data: finalCars
     });
 
   } catch (err) {
@@ -145,7 +179,6 @@ exports.getCarsWithCategory = async (req, res) => {
     });
   }
 };
-
 
 
 
