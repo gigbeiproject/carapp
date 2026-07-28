@@ -34,7 +34,8 @@ exports.createCarCategory = async (req, res) => {
 // get cars (NO approval status filter)
 exports.getCarsWithCategory = async (req, res) => {
   try {
-    const { city, category } = req.query;
+    // ✅ Added page and limit in req.query (default page 1, limit 4)
+    const { city, category, page = 1, limit = 4 } = req.query;
 
     let query = `
       SELECT 
@@ -72,9 +73,6 @@ exports.getCarsWithCategory = async (req, res) => {
     `;
 
     const params = [];
-
-    // (Optional but recommended)
-    // query += " AND cars.carEnabled = 1";
 
     if (city) {
       query += " AND cars.city LIKE ?";
@@ -131,18 +129,15 @@ exports.getCarsWithCategory = async (req, res) => {
       }
     });
 
-    // Object.values se saari mapped cars ka ek array bana liya
     const finalCars = Object.values(carsMap);
 
     // =====================================
     // CHECK ACTIVE SELF BOOKING FOR EACH CAR
     // =====================================
     for (const car of finalCars) {
-      // Default values
       car.selfBook = false;
       car.freeAfter = null;
 
-      // ✅ FIXED: Removed 'startDate <= NOW()' so it correctly catches future self-bookings too
       const [selfBooking] = await pool.query(
         `
         SELECT endDate
@@ -156,17 +151,44 @@ exports.getCarsWithCategory = async (req, res) => {
         [car.id]
       );
 
-      // Agar query result deti hai, matlab self-booking chal rahi hai ya aane wali hai
       if (selfBooking.length > 0) {
         car.selfBook = true;
         car.freeAfter = selfBooking[0].endDate;
       }
     }
 
-    // Final response bhejein
+    // =====================================
+    // ✅ 1. SORTING: Move Booked Cars to Bottom
+    // =====================================
+    finalCars.sort((a, b) => {
+      if (a.selfBook && !b.selfBook) return 1;  // a is booked, send it down
+      if (!a.selfBook && b.selfBook) return -1; // b is booked, keep a up
+      return 0; // both are same (either both booked or both free)
+    });
+
+    // =====================================
+    // ✅ 2. PAGINATION: Limit to 4 per page
+    // =====================================
+    const pageNumber = parseInt(page);
+    const limitNumber = parseInt(limit);
+    
+    // Calculate start and end index for slicing array
+    const startIndex = (pageNumber - 1) * limitNumber;
+    const endIndex = pageNumber * limitNumber;
+
+    // Extract only the cars for the current page
+    const paginatedCars = finalCars.slice(startIndex, endIndex);
+
+    // Final response
     res.status(200).json({
       success: true,
-      data: finalCars
+      pagination: {
+        totalCars: finalCars.length,
+        currentPage: pageNumber,
+        totalPages: Math.ceil(finalCars.length / limitNumber),
+        limit: limitNumber
+      },
+      data: paginatedCars
     });
 
   } catch (err) {
