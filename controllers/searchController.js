@@ -1,6 +1,6 @@
 const db = require("../config/db");
 
-exports.searchCars = async (req, res) => {
+ exports.searchCars = async (req, res) => {
   try {
     const { city, pickupDateTime, dropDateTime } = req.query;
 
@@ -8,9 +8,9 @@ exports.searchCars = async (req, res) => {
       return res.status(400).json({ success: false, message: "city, pickupDateTime and dropDateTime are required" });
     }
 
-    // 1️⃣ Fetch all cars in the city
+    // 1️⃣ Fetch ONLY APPROVED cars in the city
     const [cars] = await db.execute(
-      "SELECT * FROM cars WHERE city = ?",
+      "SELECT * FROM cars WHERE city = ? AND carApprovalStatus = 'APPROVED'",
       [city]
     );
 

@@ -190,9 +190,8 @@ exports.createListing = async (req, res) => {
 // get all permit
 exports.getAllCars = async (req, res) => {
   try {
-
     // =====================================
-    // GET ALL APPROVED CARS
+    // 1. GET ALL APPROVED CARS
     // =====================================
     const [cars] = await db.execute(
       `
@@ -207,49 +206,29 @@ exports.getAllCars = async (req, res) => {
     );
 
     // =====================================
-    // LOOP ALL CARS
+    // 2. LOOP THROUGH ALL CARS TO GET DETAILS
     // =====================================
     for (const car of cars) {
 
-      // =====================================
-      // GET CAR IMAGES
-      // =====================================
+      // Fetch Car Images
       const [images] = await db.execute(
-        `
-        SELECT imagePath
-        FROM car_images
-        WHERE carId = ?
-        `,
+        "SELECT imagePath FROM car_images WHERE carId = ?",
         [car.id]
       );
 
-      // =====================================
-      // GET CAR DOCUMENTS
-      // =====================================
+      // Fetch Car Documents
       const [documents] = await db.execute(
-        `
-        SELECT type, filePath
-        FROM car_documents
-        WHERE carId = ?
-        `,
+        "SELECT type, filePath FROM car_documents WHERE carId = ?",
         [car.id]
       );
 
-      // =====================================
-      // GET CAR FEATURES
-      // =====================================
+      // Fetch Car Features
       const [features] = await db.execute(
-        `
-        SELECT feature
-        FROM car_features
-        WHERE carId = ?
-        `,
+        "SELECT feature FROM car_features WHERE carId = ?",
         [car.id]
       );
 
-      // =====================================
-      // GET RATINGS
-      // =====================================
+      // Fetch Ratings
       const [ratingResult] = await db.execute(
         `
         SELECT
@@ -261,35 +240,22 @@ exports.getAllCars = async (req, res) => {
         [car.id]
       );
 
-      // =====================================
-      // GET BOOKING COUNT
-      // =====================================
+      // Fetch Booking Count
       const [bookingResult] = await db.execute(
-        `
-        SELECT COUNT(*) AS bookingCount
-        FROM reservations
-        WHERE carId = ?
-        `,
+        "SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?",
         [car.id]
       );
 
       // =====================================
-      // DEFAULT VALUES
+      // 3. CHECK ACTIVE SELF BOOKING (EXACT LOGIC FROM getCarsByUser)
       // =====================================
       car.selfBook = false;
-
       car.freeAfter = null;
 
-      // =====================================
-      // CHECK ACTIVE SELF BOOKING
-      // =====================================
       const [selfBooking] = await db.execute(
         `
-        SELECT
-          id,
-          startDate,
-          endDate,
-          status
+        SELECT 
+          endDate
         FROM reservations
         WHERE carId = ?
         AND status = 'SELFBOOK'
@@ -300,70 +266,36 @@ exports.getAllCars = async (req, res) => {
         [car.id]
       );
 
-      // =====================================
-      // IF SELF BOOK FOUND
-      // =====================================
+      // If self booked
       if (selfBooking.length > 0) {
-
-        const booking = selfBooking[0];
-
-        const now = new Date();
-
-        const start = new Date(booking.startDate);
-
-        const end = new Date(booking.endDate);
-
-        // =====================================
-        // ACTIVE SELF BOOK
-        // =====================================
-        if (now >= start && now <= end) {
-
-          car.selfBook = true;
-
-          car.freeAfter = booking.endDate;
-
-        } else {
-
-          car.selfBook = false;
-
-          car.freeAfter = null;
-        }
+        car.selfBook = true;
+        car.freeAfter = selfBooking[0].endDate;
       }
 
       // =====================================
-      // FORMAT RESPONSE
+      // 4. FORMAT FINAL RESPONSE
       // =====================================
       const avgRatingRaw = ratingResult[0].avgRating;
 
       car.images = images.map(img => img.imagePath);
-
       car.documents = documents;
-
       car.features = features.map(f => f.feature);
-
-      car.avgRating = avgRatingRaw
-        ? Number(parseFloat(avgRatingRaw).toFixed(1))
-        : 0;
-
-      car.totalReviews =
-        ratingResult[0].totalReviews || 0;
-
-      car.bookingCount =
-        bookingResult[0].bookingCount || 0;
+      
+      car.avgRating = avgRatingRaw ? Number(parseFloat(avgRatingRaw).toFixed(1)) : 0;
+      car.totalReviews = ratingResult[0].totalReviews || 0;
+      car.bookingCount = bookingResult[0].bookingCount || 0;
     }
 
     // =====================================
-    // FINAL RESPONSE
+    // 5. SEND RESPONSE
     // =====================================
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: cars,
     });
 
   } catch (err) {
-
     console.error("Error fetching cars:", err);
-
     return res.status(500).json({
       success: false,
       message: "Error fetching cars",
@@ -371,7 +303,6 @@ exports.getAllCars = async (req, res) => {
     });
   }
 };
-
 
 
 // get all product detiles page 
