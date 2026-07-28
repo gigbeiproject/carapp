@@ -142,14 +142,13 @@ exports.getCarsWithCategory = async (req, res) => {
       car.selfBook = false;
       car.freeAfter = null;
 
-      // Check current active self-booking
+      // ✅ FIXED: Removed 'startDate <= NOW()' so it correctly catches future self-bookings too
       const [selfBooking] = await pool.query(
         `
         SELECT endDate
         FROM reservations
         WHERE carId = ?
         AND status = 'SELFBOOK'
-        AND startDate <= NOW()
         AND endDate >= NOW()
         ORDER BY endDate ASC
         LIMIT 1
@@ -157,7 +156,7 @@ exports.getCarsWithCategory = async (req, res) => {
         [car.id]
       );
 
-      // Agar query result deti hai, matlab self-booking chal rahi hai
+      // Agar query result deti hai, matlab self-booking chal rahi hai ya aane wali hai
       if (selfBooking.length > 0) {
         car.selfBook = true;
         car.freeAfter = selfBooking[0].endDate;
@@ -179,6 +178,7 @@ exports.getCarsWithCategory = async (req, res) => {
     });
   }
 };
+
 
 
 
