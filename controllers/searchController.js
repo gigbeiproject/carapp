@@ -1,6 +1,6 @@
 const db = require("../config/db");
 
- exports.searchCars = async (req, res) => {
+exports.searchCars = async (req, res) => {
   try {
     const { city, pickupDateTime, dropDateTime } = req.query;
 
@@ -18,15 +18,45 @@ const db = require("../config/db");
     const notAvailableCars = [];
 
     for (const car of cars) {
-      // 2️⃣ Check if the car has conflicting reservations
+      // 2️⃣ Check if the car has conflicting reservations (Including PENDING, CONFIRMED, and SELFBOOK)
       const [reservations] = await db.execute(
         `SELECT startDate, endDate 
          FROM reservations 
          WHERE carId = ? 
-           AND status IN ('PENDING','CONFIRMED')
+           AND status IN ('PENDING', 'CONFIRMED', 'SELFBOOK')
            AND NOT (endDate <= ? OR startDate >= ?)`,
         [car.id, pickupDateTime, dropDateTime]
       );
+
+      // =====================================
+      // 3. CHECK CURRENT ACTIVE SELF BOOKING (For UI metadata)
+      // =====================================
+      car.selfBook = false;
+      car.freeAfter = null;
+
+      const [activeSelfBooking] = await db.execute(
+        `
+        SELECT endDate
+        FROM reservations
+        WHERE carId = ?
+        AND status = 'SELFBOOK'
+        AND endDate >= NOW()
+        ORDER BY endDate ASC
+        LIMIT 1
+        `,
+        [car.id]
+      );
+
+      if (activeSelfBooking.length > 0) {
+        car.selfBook = true;
+        car.freeAfter = activeSelfBooking[0].endDate;
+      }
+
+      // Fetch images and features
+      const [images] = await db.execute("SELECT imagePath FROM car_images WHERE carId = ?", [car.id]);
+      const [features] = await db.execute("SELECT feature FROM car_features WHERE carId = ?", [car.id]);
+      car.images = images.map(i => i.imagePath);
+      car.features = features.map(f => f.feature);
 
       if (reservations.length === 0) {
         // Car is available
@@ -42,12 +72,6 @@ const db = require("../config/db");
           conflictingDates
         });
       }
-
-      // Optional: fetch images, features
-      const [images] = await db.execute("SELECT imagePath FROM car_images WHERE carId = ?", [car.id]);
-      const [features] = await db.execute("SELECT feature FROM car_features WHERE carId = ?", [car.id]);
-      car.images = images.map(i => i.imagePath);
-      car.features = features.map(f => f.feature);
     }
 
     res.status(200).json({
