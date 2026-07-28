@@ -193,12 +193,12 @@ exports.getAllCars = async (req, res) => {
     // =====================================
     // 1. GET PAGINATION PARAMETERS
     // =====================================
-    const page = parseInt(req.query.page) || 1; // Default page 1
-    const limit = parseInt(req.query.limit) || 10; // Default 10 cars per page
+    const page = parseInt(req.query.page) || 1; 
+    const limit = parseInt(req.query.limit) || 10; 
     const offset = (page - 1) * limit;
 
     // =====================================
-    // 2. GET TOTAL COUNT FOR PAGINATION METADATA
+    // 2. GET TOTAL COUNT FOR PAGINATION
     // =====================================
     const [countResult] = await db.execute(
       "SELECT COUNT(*) AS totalCars FROM cars WHERE carApprovalStatus = 'APPROVED'"
@@ -209,9 +209,6 @@ exports.getAllCars = async (req, res) => {
     // =====================================
     // 3. GET PAGINATED APPROVED CARS
     // =====================================
-    // Note: Using string interpolation for LIMIT and OFFSET because some MySQL 
-    // drivers have issues with parameterized queries for these specific clauses.
-    // Variables are safely parsed as integers above.
     const [cars] = await db.execute(
       `
       SELECT 
@@ -226,88 +223,46 @@ exports.getAllCars = async (req, res) => {
     );
 
     // =====================================
-    // 4. LOOP THROUGH PAGINATED CARS TO GET DETAILS
+    // 4. PARALLEL EXECUTION (SUPER FAST)
     // =====================================
-    for (const car of cars) {
-
-      // Fetch Car Images
-      const [images] = await db.execute(
-        "SELECT imagePath FROM car_images WHERE carId = ?",
-        [car.id]
-      );
-
-      // Fetch Car Documents
-      const [documents] = await db.execute(
-        "SELECT type, filePath FROM car_documents WHERE carId = ?",
-        [car.id]
-      );
-
-      // Fetch Car Features
-      const [features] = await db.execute(
-        "SELECT feature FROM car_features WHERE carId = ?",
-        [car.id]
-      );
-
-      // Fetch Ratings
-      const [ratingResult] = await db.execute(
-        `
-        SELECT
-          AVG(rating) AS avgRating,
-          COUNT(*) AS totalReviews
-        FROM car_reviews
-        WHERE carId = ?
-        `,
-        [car.id]
-      );
-
-      // Fetch Booking Count
-      const [bookingResult] = await db.execute(
-        "SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?",
-        [car.id]
-      );
-
-      // =====================================
-      // 5. CHECK ACTIVE SELF BOOKING
-      // =====================================
-      car.selfBook = false;
-      car.freeAfter = null;
-
-      const [selfBooking] = await db.execute(
-        `
-        SELECT 
-          endDate
-        FROM reservations
-        WHERE carId = ?
-        AND status = 'SELFBOOK'
-        AND endDate >= NOW()
-        ORDER BY endDate ASC
-        LIMIT 1
-        `,
-        [car.id]
-      );
-
-      // If self booked
-      if (selfBooking.length > 0) {
-        car.selfBook = true;
-        car.freeAfter = selfBooking[0].endDate;
-      }
-
-      // =====================================
-      // 6. FORMAT FINAL RESPONSE
-      // =====================================
-      const avgRatingRaw = ratingResult[0].avgRating;
-
-      car.images = images.map(img => img.imagePath);
-      car.documents = documents;
-      car.features = features.map(f => f.feature);
+    // Promise.all aur .map ka use karke loop ki saari queries ek sath trigger hongi
+    const formattedCars = await Promise.all(cars.map(async (car) => {
       
-      car.avgRating = avgRatingRaw ? Number(parseFloat(avgRatingRaw).toFixed(1)) : 0;
-      car.totalReviews = ratingResult[0].totalReviews || 0;
-      car.bookingCount = bookingResult[0].bookingCount || 0;
-    }
+      // Ek hi car ki saari details ek sath mangwa rahe hain (Parallel execution)
+      const [
+        [images], 
+        [documents], 
+        [features], 
+        [ratingResult], 
+        [bookingResult], 
+        [selfBooking]
+      ] = await Promise.all([
+        db.execute("SELECT imagePath FROM car_images WHERE carId = ?", [car.id]),
+        db.execute("SELECT type, filePath FROM car_documents WHERE carId = ?", [car.id]),
+        db.execute("SELECT feature FROM car_features WHERE carId = ?", [car.id]),
+        db.execute("SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?", [car.id]),
+        db.execute("SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?", [car.id]),
+        db.execute("SELECT endDate FROM reservations WHERE carId = ? AND status = 'SELFBOOK' AND endDate >= NOW() ORDER BY endDate ASC LIMIT 1", [car.id])
+      ]);
+
+      const avgRatingRaw = ratingResult[0].avgRating;
+      
+      // Object format karke return karo
+      return {
+        ...car,
+        selfBook: selfBooking.length > 0 ? true : false,
+        freeAfter: selfBooking.length > 0 ? selfBooking[0].endDate : null,
+        images: images.map(img => img.imagePath),
+        documents: documents,
+        features: features.map(f => f.feature),
+        avgRating: avgRatingRaw ? Number(parseFloat(avgRatingRaw).toFixed(1)) : 0,
+        totalReviews: ratingResult[0].totalReviews || 0,
+        bookingCount: bookingResult[0].bookingCount || 0
+      };
+    }));
 
     // =====================================
-    // 7. SEND PAGINATED RESPONSE
+    // 5. SEND FAST PAGINATED RESPONSE
     // =====================================
     return res.status(200).json({
       success: true,
@@ -317,7 +272,7 @@ exports.getAllCars = async (req, res) => {
         totalPages,
         limit
       },
-      data: cars,
+      data: formattedCars, // Use the fast formatted array here
     });
 
   } catch (err) {
