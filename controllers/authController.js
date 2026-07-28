@@ -185,7 +185,7 @@ exports.verifyOtp = async (req, res) => {
     const token = jwt.sign(
       { id: user.id, phoneNumber: user.phoneNumber, role: user.role },
       "mySuperSecretKey123",   // <-- direct secret key here
-      { expiresIn: "7d" }
+      { expiresIn: "365d" }
     );
 
 
