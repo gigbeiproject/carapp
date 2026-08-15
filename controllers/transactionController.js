@@ -1,11 +1,19 @@
 const db = require("../config/db");
+const { parsePagination, buildPaginationMeta } = require("../utils/pagination");
 
 exports.getHostCompletedReservations = async (req, res) => {
   try {
     const hostId = req.user.id; // ✅ user ID from token (protect middleware)
+    const { page, limit, offset } = parsePagination(req.query, { defaultLimit: 10 });
 
-    const [rows] = await db.execute(
-      `SELECT 
+    const [countRows] = await db.query(
+      "SELECT COUNT(*) AS total FROM reservations r WHERE r.hostId = ? AND r.status = 'COMPLETED'",
+      [hostId]
+    );
+    const total = countRows[0].total;
+
+    const [rows] = await db.query(
+      `SELECT
           r.id,
           r.carId,
           r.amount,
@@ -15,21 +23,18 @@ exports.getHostCompletedReservations = async (req, res) => {
        FROM reservations r
        LEFT JOIN cars c ON r.carId = c.id
        WHERE r.hostId = ? AND r.status = 'COMPLETED'
-       ORDER BY r.createdAt DESC`,
-      [hostId]
+       ORDER BY r.createdAt DESC
+       LIMIT ? OFFSET ?`,
+      [hostId, limit, offset]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No completed reservations found"
-      });
-    }
-
+    // An empty page is not an error — always 200, matching every other
+    // paginated list endpoint.
     res.status(200).json({
       success: true,
       count: rows.length,
-      data: rows
+      data: rows,
+      pagination: buildPaginationMeta(page, limit, total),
     });
 
   } catch (error) {

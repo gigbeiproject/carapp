@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const { parsePagination, buildPaginationMeta } = require("../utils/pagination");
 
 // ➕ Add to Favorites
 exports.addToWishlist = async (req, res) => {
@@ -67,10 +68,17 @@ exports.addToWishlist = async (req, res) => {
 exports.getFavorites = async (req, res) => {
   try {
     const userId = req.user.id;
+    const { page, limit, offset } = parsePagination(req.query, { defaultLimit: 10 });
 
-    // Fetch wishlist with car info and host info
+    const [countRows] = await db.query(
+      "SELECT COUNT(*) AS total FROM wishlist w WHERE w.user_id = ?",
+      [userId]
+    );
+    const total = countRows[0].total;
+
+    // Fetch this page of the wishlist with car info and host info
     const [favorites] = await db.query(
-      `SELECT 
+      `SELECT
           w.id AS wishlist_id,
           w.car_id,
           c.title AS car_title,
@@ -87,8 +95,10 @@ exports.getFavorites = async (req, res) => {
        FROM wishlist w
        LEFT JOIN cars c ON w.car_id = c.id
        LEFT JOIN users u ON c.userId = u.id
-       WHERE w.user_id = ?`,
-      [userId]
+       WHERE w.user_id = ?
+       ORDER BY w.id DESC
+       LIMIT ? OFFSET ?`,
+      [userId, limit, offset]
     );
 
     for (const fav of favorites) {
@@ -122,7 +132,11 @@ exports.getFavorites = async (req, res) => {
       fav.bookingCount = bookingResult[0].bookingCount;
     }
 
-    res.status(200).json({ success: true, data: favorites });
+    res.status(200).json({
+      success: true,
+      data: favorites,
+      pagination: buildPaginationMeta(page, limit, total),
+    });
   } catch (error) {
     console.error("Error fetching favorites:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });

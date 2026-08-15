@@ -1,8 +1,7 @@
 const jwt = require("jsonwebtoken");
 const db = require("../../config/db");
 
-// JWT Secret (move to .env ideally)
-const JWT_SECRET = "mySuperSecretKey123";
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ✅ Validate Session Controller
 exports.verifySession = async (req, res) => {

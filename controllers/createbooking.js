@@ -3,6 +3,7 @@ const razorpay = require("../config/razorpay");
 const crypto = require("crypto");
 const db = require("../config/db"); // ✅ Add this
 const axios = require("axios");
+const { parsePagination, buildPaginationMeta } = require("../utils/pagination");
 
 const createBookingOrder = async (req, res) => {
   try {
@@ -97,6 +98,20 @@ const verifyBookingPayment = async (req, res) => {
       razorpay_signature,
     } = req.body;
 
+    // ✅ Normalize incoming date/time to a real UTC instant before it ever
+    // touches the DB. The `reservations` table stores naive DATETIME
+    // columns that are treated as UTC wall-clock (see config/db.js
+    // `timezone: 'Z'`); this is the single boundary where any client's
+    // date string gets converted to that canonical representation.
+    const startDateUtc = new Date(startDate);
+    const endDateUtc = new Date(endDate);
+    if (isNaN(startDateUtc.getTime()) || isNaN(endDateUtc.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate or endDate",
+      });
+    }
+
     // ✅ Verify Razorpay signature
     const body = razorpay_order_id + "|" + razorpay_payment_id;
     const expectedSignature = crypto
@@ -132,8 +147,8 @@ const verifyBookingPayment = async (req, res) => {
         bookingId,
         userId,
         carId,
-        startDate,
-        endDate,
+        startDateUtc,
+        endDateUtc,
         amount,
         totalHours,
         userLocation,
@@ -197,34 +212,54 @@ const verifyBookingPayment = async (req, res) => {
 
 
 
+// Which reservation statuses belong to each of the mobile app's two tabs.
+const BOOKING_TAB_STATUSES = {
+  upcoming: ["PENDING", "CONFIRMED", "CANCELLED", "START"],
+  completed: ["COMPLETED"],
+};
+
 const getUserBookings = async (req, res) => {
   try {
     const userId = req.user.id;
+    const { page, limit, offset } = parsePagination(req.query, { defaultLimit: 10 });
+    const tab = (req.query.tab || "upcoming").toLowerCase();
+    const statuses = BOOKING_TAB_STATUSES[tab] || BOOKING_TAB_STATUSES.upcoming;
+    const statusPlaceholders = statuses.map(() => "?").join(",");
 
-    // Fetch all bookings for this user along with car + host details
-    const [bookings] = await db.execute(
-      `SELECT 
-          r.*, 
-          c.title AS carTitle, 
-          c.pricePerHour, 
-          c.city, 
-          c.fuelType, 
+    const [countRows] = await db.query(
+      `SELECT COUNT(*) AS total FROM reservations r WHERE r.userId = ? AND r.status IN (${statusPlaceholders})`,
+      [userId, ...statuses]
+    );
+    const total = countRows[0].total;
+
+    // Fetch this page of the user's bookings (for the requested tab) along
+    // with car + host details.
+    const [bookings] = await db.query(
+      `SELECT
+          r.*,
+          c.title AS carTitle,
+          c.pricePerHour,
+          c.city,
+          c.fuelType,
           c.transmissionType,
-          c.seats, 
-          c.doors, 
-          c.luggageCapacity, 
-          c.userId AS hostId, 
-          u.name AS hostName, 
+          c.seats,
+          c.doors,
+          c.luggageCapacity,
+          c.userId AS hostId,
+          u.name AS hostName,
           u.phoneNumber AS hostPhone
        FROM reservations r
        JOIN cars c ON r.carId = c.id
        JOIN users u ON c.userId = u.id
-       WHERE r.userId = ?
-       ORDER BY r.startDate DESC`,
-      [userId]
+       WHERE r.userId = ? AND r.status IN (${statusPlaceholders})
+       ORDER BY r.startDate DESC
+       LIMIT ? OFFSET ?`,
+      [userId, ...statuses, limit, offset]
     );
 
-    // Helper to enrich bookings with images, features, and ratings
+    // Helper to enrich bookings with images, features, and ratings — now
+    // only runs across this page's rows rather than every booking the
+    // user has ever made.
     const enrichBookings = async (bookings) => {
       for (const r of bookings) {
         // Car images
@@ -254,23 +289,12 @@ const getUserBookings = async (req, res) => {
       return bookings;
     };
 
-    // Enrich all bookings with details
     const enrichedBookings = await enrichBookings(bookings);
 
-    // Split into upcoming and completed arrays based on status
-    const upcomingStatuses = ["PENDING", "CONFIRMED", "CANCELLED", "START"];
-    const upcoming = enrichedBookings.filter((b) =>
-      upcomingStatuses.includes(b.status)
-    );
-    const completed = enrichedBookings.filter(
-      (b) => b.status === "COMPLETED"
-    );
-
-    // ✅ Always return both arrays
     res.status(200).json({
       success: true,
-      upcoming,
-      completed,
+      data: enrichedBookings,
+      pagination: buildPaginationMeta(page, limit, total),
     });
   } catch (err) {
     console.error("Error fetching user bookings:", err);
@@ -474,6 +498,25 @@ const selfBookCar = async (req, res) => {
       });
     }
 
+    // Normalize to a real UTC instant — same boundary/reasoning as
+    // verifyBookingPayment above.
+    const startDateUtc = new Date(startDate);
+    const endDateUtc = new Date(endDate);
+    if (isNaN(startDateUtc.getTime()) || isNaN(endDateUtc.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate or endDate",
+      });
+    }
+    const bookingStartUtc = bookingStartDateTime ? new Date(bookingStartDateTime) : startDateUtc;
+    const bookingEndUtc = bookingEndDateTime ? new Date(bookingEndDateTime) : endDateUtc;
+    if (isNaN(bookingStartUtc.getTime()) || isNaN(bookingEndUtc.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid bookingStartDateTime or bookingEndDateTime",
+      });
+    }
+
     // ===============================
     // CHECK CAR EXISTS
     // ===============================
@@ -530,10 +573,10 @@ const selfBookCar = async (req, res) => {
       `,
       [
         carId,
-        startDate,
-        endDate,
-        startDate,
-        endDate,
+        startDateUtc,
+        endDateUtc,
+        startDateUtc,
+        endDateUtc,
       ]
     );
 
@@ -582,10 +625,10 @@ const selfBookCar = async (req, res) => {
         bookingId,
         userId,
         carId,
-        startDate,
-        endDate,
-        bookingStartDateTime || startDate,
-        bookingEndDateTime || endDate,
+        startDateUtc,
+        endDateUtc,
+        bookingStartUtc,
+        bookingEndUtc,
         0,
         0,
         "SELFBOOK",

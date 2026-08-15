@@ -34,158 +34,111 @@ exports.createCarCategory = async (req, res) => {
 // get cars (NO approval status filter)
 exports.getCarsWithCategory = async (req, res) => {
   try {
-    // ✅ Added page and limit in req.query (default page 1, limit 4)
-    const { city, category, page = 1, limit = 4 } = req.query;
+    const { city, category } = req.query;
+    let pageNumber = parseInt(req.query.page, 10);
+    let limitNumber = parseInt(req.query.limit, 10);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) pageNumber = 1;
+    if (!Number.isInteger(limitNumber) || limitNumber < 1) limitNumber = 4;
+    if (limitNumber > 100) limitNumber = 100;
+    const offset = (pageNumber - 1) * limitNumber;
 
-    let query = `
-      SELECT 
-        cars.id,
-        cars.userId,
-        cars.title,
-        cars.city,
-        cars.pricePerHour,
-        cars.securityDeposit,
-        cars.seats,
-        cars.doors,
-        cars.luggageCapacity,
-        cars.fuelType,
-        cars.transmissionType,
-        cars.carLocation,
-        cars.carCategoryId,
-        cars.lat,
-        cars.lng,
-        cars.driverAvailable,
-        cars.pickupDropAvailable,
-        cars.createdAt,
-        cars.updatedAt,
-        cars.carApprovalStatus,
-        cars.repairMode,
-        cars.carEnabled,
-        
+    // Filters (and the category-name join) apply to both the count and the
+    // page query, so build them once.
+    const whereParts = ["cars.carApprovalStatus = 'APPROVED'"];
+    const whereParams = [];
+    if (city) {
+      whereParts.push("cars.city LIKE ?");
+      whereParams.push(`%${city}%`);
+    }
+    if (category) {
+      whereParts.push("car_categories.name LIKE ?");
+      whereParams.push(`%${category}%`);
+    }
+    const whereClause = `WHERE ${whereParts.join(" AND ")}`;
+    const joinClause = `FROM cars LEFT JOIN car_categories ON cars.carCategoryId = car_categories.id ${whereClause}`;
+
+    const [countRows] = await pool.query(`SELECT COUNT(*) AS total ${joinClause}`, whereParams);
+    const totalCars = countRows[0].total;
+
+    // Determine this page's cars (no image join here — that's 1-to-many
+    // and would inflate/skew LIMIT/OFFSET). Active self-booking status is
+    // computed inline via a correlated subquery instead of a per-car N+1
+    // loop, and used to keep booked cars sorted to the bottom, same as
+    // before.
+    const [cars] = await pool.query(
+      `
+      SELECT
+        cars.id, cars.userId, cars.title, cars.city, cars.pricePerHour,
+        cars.securityDeposit, cars.seats, cars.doors, cars.luggageCapacity,
+        cars.fuelType, cars.transmissionType, cars.carLocation, cars.carCategoryId,
+        cars.lat, cars.lng, cars.driverAvailable, cars.pickupDropAvailable,
+        cars.createdAt, cars.updatedAt, cars.carApprovalStatus, cars.repairMode, cars.carEnabled,
         car_categories.name AS categoryName,
         car_categories.image AS categoryImage,
-        
-        car_images.imagePath
-      FROM cars
-      LEFT JOIN car_categories ON cars.carCategoryId = car_categories.id
-      LEFT JOIN car_images ON cars.id = car_images.carId
-      WHERE cars.carApprovalStatus = 'APPROVED'
-    `;
+        EXISTS (
+          SELECT 1 FROM reservations r
+          WHERE r.carId = cars.id AND r.status = 'SELFBOOK' AND r.endDate >= NOW()
+        ) AS selfBook,
+        (
+          SELECT r2.endDate FROM reservations r2
+          WHERE r2.carId = cars.id AND r2.status = 'SELFBOOK' AND r2.endDate >= NOW()
+          ORDER BY r2.endDate ASC LIMIT 1
+        ) AS freeAfter
+      ${joinClause}
+      ORDER BY selfBook ASC, cars.createdAt DESC
+      LIMIT ? OFFSET ?
+      `,
+      [...whereParams, limitNumber, offset]
+    );
 
-    const params = [];
+    // Fetch images for just this page's cars.
+    const carIds = cars.map((c) => c.id);
+    const images = carIds.length
+      ? (
+          await pool.query(
+            `SELECT carId, imagePath FROM car_images WHERE carId IN (${carIds.map(() => "?").join(",")})`,
+            carIds
+          )
+        )[0]
+      : [];
 
-    if (city) {
-      query += " AND cars.city LIKE ?";
-      params.push(`%${city}%`);
-    }
+    const paginatedCars = cars.map((car) => ({
+      id: car.id,
+      userId: car.userId,
+      title: car.title,
+      city: car.city,
+      pricePerHour: car.pricePerHour,
+      securityDeposit: car.securityDeposit,
+      seats: car.seats,
+      doors: car.doors,
+      luggageCapacity: car.luggageCapacity,
+      fuelType: car.fuelType,
+      transmissionType: car.transmissionType,
+      carLocation: car.carLocation,
+      carCategoryId: car.carCategoryId,
+      lat: car.lat,
+      lng: car.lng,
+      driverAvailable: car.driverAvailable,
+      pickupDropAvailable: car.pickupDropAvailable,
+      createdAt: car.createdAt,
+      updatedAt: car.updatedAt,
+      carApprovalStatus: car.carApprovalStatus,
+      repairMode: car.repairMode,
+      carEnabled: car.carEnabled,
+      category: { name: car.categoryName, image: car.categoryImage },
+      images: images.filter((img) => img.carId === car.id).map((img) => img.imagePath),
+      selfBook: !!car.selfBook,
+      freeAfter: car.freeAfter || null,
+    }));
 
-    if (category) {
-      query += " AND car_categories.name LIKE ?";
-      params.push(`%${category}%`);
-    }
-
-    const [rows] = await pool.query(query, params);
-
-    // Group images per car
-    const carsMap = {};
-
-    rows.forEach(row => {
-      if (!carsMap[row.id]) {
-        carsMap[row.id] = {
-          id: row.id,
-          userId: row.userId,
-          title: row.title,
-          city: row.city,
-          pricePerHour: row.pricePerHour,
-          securityDeposit: row.securityDeposit,
-          seats: row.seats,
-          doors: row.doors,
-          luggageCapacity: row.luggageCapacity,
-          fuelType: row.fuelType,
-          transmissionType: row.transmissionType,
-          carLocation: row.carLocation,
-          carCategoryId: row.carCategoryId,
-          lat: row.lat,
-          lng: row.lng,
-          driverAvailable: row.driverAvailable,
-          pickupDropAvailable: row.pickupDropAvailable,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          carApprovalStatus: row.carApprovalStatus,
-          repairMode: row.repairMode,
-          carEnabled: row.carEnabled,
-
-          category: {
-            name: row.categoryName,
-            image: row.categoryImage
-          },
-
-          images: []
-        };
-      }
-
-      if (row.imagePath) {
-        carsMap[row.id].images.push(row.imagePath);
-      }
-    });
-
-    const finalCars = Object.values(carsMap);
-
-    // =====================================
-    // CHECK ACTIVE SELF BOOKING FOR EACH CAR
-    // =====================================
-    for (const car of finalCars) {
-      car.selfBook = false;
-      car.freeAfter = null;
-
-      const [selfBooking] = await pool.query(
-        `
-        SELECT endDate
-        FROM reservations
-        WHERE carId = ?
-        AND status = 'SELFBOOK'
-        AND endDate >= NOW()
-        ORDER BY endDate ASC
-        LIMIT 1
-        `,
-        [car.id]
-      );
-
-      if (selfBooking.length > 0) {
-        car.selfBook = true;
-        car.freeAfter = selfBooking[0].endDate;
-      }
-    }
-
-    // =====================================
-    // ✅ 1. SORTING: Move Booked Cars to Bottom
-    // =====================================
-    finalCars.sort((a, b) => {
-      if (a.selfBook && !b.selfBook) return 1;  // a is booked, send it down
-      if (!a.selfBook && b.selfBook) return -1; // b is booked, keep a up
-      return 0; // both are same (either both booked or both free)
-    });
-
-    // =====================================
-    // ✅ 2. PAGINATION: Limit to 4 per page
-    // =====================================
-    const pageNumber = parseInt(page);
-    const limitNumber = parseInt(limit);
-    
-    // Calculate start and end index for slicing array
-    const startIndex = (pageNumber - 1) * limitNumber;
-    const endIndex = pageNumber * limitNumber;
-
-    // Extract only the cars for the current page
-    const paginatedCars = finalCars.slice(startIndex, endIndex);
-
-    // Final response
+    // Final response — same shape as before (this endpoint already had a
+    // consumer relying on it), just backed by real SQL pagination now.
     res.status(200).json({
       success: true,
       pagination: {
-        totalCars: finalCars.length,
+        totalCars,
         currentPage: pageNumber,
-        totalPages: Math.ceil(finalCars.length / limitNumber),
+        totalPages: Math.max(1, Math.ceil(totalCars / limitNumber)),
         limit: limitNumber
       },
       data: paginatedCars

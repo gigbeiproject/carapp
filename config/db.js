@@ -18,6 +18,11 @@ const connection = mysql.createPool({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 3306,
   charset: "utf8mb4",
+  // Force UTC interpretation of DATETIME columns so date reads are
+  // deterministic regardless of the Node process's own OS timezone.
+  // Without this, mysql2 defaults to 'local', meaning the same row can
+  // read back as a different instant depending on server deployment TZ.
+  timezone: "Z",
 });
 
 module.exports = connection;
