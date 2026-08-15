@@ -12,17 +12,29 @@ exports.createCoupon = async (req, res) => {
       maxDiscount,
       startDate,
       endDate,
-      usageLimit
+      usageLimit,
+      minHours,
+      belowMinHoursDiscount
     } = req.body;
 
     if (!code || !discountType || !discountValue || !startDate || !endDate) {
       return res.status(400).json({ success: false, message: "Required fields missing" });
     }
 
+    // If an hour threshold is given, the "below threshold" discount is
+    // required too — otherwise there's no defined behavior for shorter
+    // bookings.
+    if (minHours && (belowMinHoursDiscount === undefined || belowMinHoursDiscount === null || belowMinHoursDiscount === '')) {
+      return res.status(400).json({
+        success: false,
+        message: "belowMinHoursDiscount is required when minHours is set"
+      });
+    }
+
     await db.execute(
       `INSERT INTO coupons
-       (id, code, discountType, discountValue, minAmount, maxDiscount, startDate, endDate, usageLimit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, code, discountType, discountValue, minAmount, maxDiscount, startDate, endDate, usageLimit, minHours, belowMinHoursDiscount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         uuidv4(),
         code,
@@ -32,7 +44,9 @@ exports.createCoupon = async (req, res) => {
         maxDiscount || null,
         startDate,
         endDate,
-        usageLimit || 1
+        usageLimit || 1,
+        minHours || null,
+        minHours ? belowMinHoursDiscount : null
       ]
     );
 
@@ -73,7 +87,7 @@ exports.getAllCoupons = async (req, res) => {
 // ✅ Apply Coupon (During Booking)
   exports.applyCoupon = async (req, res) => {
     try {
-      const { couponCode, bookingAmount } = req.body;
+      const { couponCode, bookingAmount, totalHours } = req.body;
       const userId = req.user.id; // ✅ get userId from token
 
       if (!couponCode || !bookingAmount) {
@@ -111,13 +125,20 @@ exports.getAllCoupons = async (req, res) => {
         return res.status(400).json({ success: false, message: "Coupon usage limit reached" });
       }
 
-      // 4️⃣ Calculate discount
+      // 4️⃣ Calculate discount — hour-tiered when the coupon has an hour
+      // threshold configured: bookings shorter than minHours use
+      // belowMinHoursDiscount instead of the normal discountValue.
+      const applicableDiscountValue =
+        coupon.minHours && Number(totalHours) < coupon.minHours
+          ? coupon.belowMinHoursDiscount
+          : coupon.discountValue;
+
       let discount = 0;
       if (coupon.discountType === "PERCENT") {
-        discount = (bookingAmount * coupon.discountValue) / 100;
+        discount = (bookingAmount * applicableDiscountValue) / 100;
         if (coupon.maxDiscount) discount = Math.min(discount, coupon.maxDiscount);
       } else {
-        discount = coupon.discountValue;
+        discount = applicableDiscountValue;
       }
 
       res.status(200).json({
