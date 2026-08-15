@@ -1,6 +1,22 @@
 const { v4: uuidv4 } = require("uuid");
 const db = require("../config/db"); // your mysql pool/connection
 
+// A coupon's duration threshold (`minHours`) is stored as a plain number
+// whose unit is given by `durationUnit` — convert it to hours (the unit
+// bookings' `totalHours` is measured in) before comparing. MONTHS uses a
+// flat 30-day approximation since booking durations don't need
+// calendar-exact month lengths for this comparison.
+const DURATION_UNIT_TO_HOURS = {
+  HOURS: 1,
+  WEEKS: 24 * 7,
+  MONTHS: 24 * 30,
+};
+
+function thresholdInHours(coupon) {
+  const factor = DURATION_UNIT_TO_HOURS[coupon.durationUnit] || 1;
+  return coupon.minHours * factor;
+}
+
 // ✅ Create Coupon (Admin)
 exports.createCoupon = async (req, res) => {
   try {
@@ -14,6 +30,7 @@ exports.createCoupon = async (req, res) => {
       endDate,
       usageLimit,
       minHours,
+      durationUnit,
       belowMinHoursDiscount
     } = req.body;
 
@@ -21,7 +38,7 @@ exports.createCoupon = async (req, res) => {
       return res.status(400).json({ success: false, message: "Required fields missing" });
     }
 
-    // If an hour threshold is given, the "below threshold" discount is
+    // If a duration threshold is given, the "below threshold" discount is
     // required too — otherwise there's no defined behavior for shorter
     // bookings.
     if (minHours && (belowMinHoursDiscount === undefined || belowMinHoursDiscount === null || belowMinHoursDiscount === '')) {
@@ -33,8 +50,8 @@ exports.createCoupon = async (req, res) => {
 
     await db.execute(
       `INSERT INTO coupons
-       (id, code, discountType, discountValue, minAmount, maxDiscount, startDate, endDate, usageLimit, minHours, belowMinHoursDiscount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, code, discountType, discountValue, minAmount, maxDiscount, startDate, endDate, usageLimit, minHours, durationUnit, belowMinHoursDiscount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         uuidv4(),
         code,
@@ -46,6 +63,7 @@ exports.createCoupon = async (req, res) => {
         endDate,
         usageLimit || 1,
         minHours || null,
+        minHours ? (durationUnit || "HOURS") : null,
         minHours ? belowMinHoursDiscount : null
       ]
     );
@@ -60,11 +78,16 @@ exports.createCoupon = async (req, res) => {
 // ✅ Get All Coupons (Admin)
 exports.getAllCoupons = async (req, res) => {
   try {
+    // NOW() rather than CURDATE()/DATE() — coupons can now have
+    // hour-precision or relative-duration validity windows (e.g. "valid
+    // for 48 hours"), and truncating to whole days would keep a coupon
+    // showing as active for the rest of its expiry day after it's
+    // actually expired.
     const [coupons] = await db.execute(`
-      SELECT * 
+      SELECT *
       FROM coupons
-      WHERE 
-        CURDATE() BETWEEN DATE(startDate) AND DATE(endDate)
+      WHERE
+        NOW() BETWEEN startDate AND endDate
       ORDER BY createdAt DESC
     `);
 
@@ -125,11 +148,12 @@ exports.getAllCoupons = async (req, res) => {
         return res.status(400).json({ success: false, message: "Coupon usage limit reached" });
       }
 
-      // 4️⃣ Calculate discount — hour-tiered when the coupon has an hour
-      // threshold configured: bookings shorter than minHours use
-      // belowMinHoursDiscount instead of the normal discountValue.
+      // 4️⃣ Calculate discount — duration-tiered when the coupon has a
+      // threshold configured: bookings shorter than the threshold (converted
+      // to hours from whatever unit — Hours/Weeks/Months — the coupon was
+      // configured with) use belowMinHoursDiscount instead of discountValue.
       const applicableDiscountValue =
-        coupon.minHours && Number(totalHours) < coupon.minHours
+        coupon.minHours && Number(totalHours) < thresholdInHours(coupon)
           ? coupon.belowMinHoursDiscount
           : coupon.discountValue;
 
