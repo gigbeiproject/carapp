@@ -12,7 +12,7 @@ exports.protect = (req, res, next) => {
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, "mySuperSecretKey123");
 
     console.log("Decoded token:", decoded); // 👈 Check what fields exist (should include id)
 
