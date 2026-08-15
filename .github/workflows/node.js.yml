@@ -9,27 +9,36 @@ on:
   pull_request:
     branches: [ "main" ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
     runs-on: self-hosted
-
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+    timeout-minutes: 15
 
     steps:
     - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
+    - name: Use Node.js 20
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: 20
         cache: 'npm'
-    - run: npm ci
+
+    - name: Environment info
+      run: |
+       node --version
+       npm --version
+       npm config get registry
+
+    - name: Install dependencies
+      run: npm ci --no-audit --no-fund
+
     - run: |
        touch .env
-       echo "${{secrets.PROD_ENV_FILE}}" > .env
+       printf '%s' "${{ secrets.PROD_ENV_FILE }}" > .env
 
     - name: Deploy to EC2
       run: |
