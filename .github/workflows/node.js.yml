@@ -1,50 +1,21 @@
-name: Node.js CI / CD main
+name: Deploy to VPS
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  build:
-
-    runs-on: self-hosted
-    timeout-minutes: 15
-
+  deploy:
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js 20
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-        cache: 'npm'
-
-    - name: Environment info
-      run: |
-       node --version
-       npm --version
-       npm config get registry
-
-    - name: Install dependencies
-      run: npm ci --no-audit --no-fund
-
-    - run: |
-       touch .env
-       printf '%s' "${{ secrets.PROD_ENV_FILE }}" > .env
-
-    - name: Deploy to EC2
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh -o StrictHostKeyChecking=no ubuntu@ec2-13-61-135-29.eu-north-1.compute.amazonaws.com << 'EOF'
-        cd  actions-runner-backend/_work/carapp/carapp
-        git pull origin main
-        npm install
-        pm2 restart backend
-        EOF
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            bash /var/www/carapp/deploy.sh
