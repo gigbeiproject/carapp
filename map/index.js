@@ -39,6 +39,8 @@ app.use(cors());
 app.use(express.json({ limit: "500mb" }));
 app.use(express.urlencoded({ extended: true, limit: "500mb" }));
 
+// Log every API call to the console (method, URL, status, time, body)
+app.use(require("../middleware/requestLogger"));
 
 app.get('/', (req, res) => {
   res.send('Server is workings map 14sss');
