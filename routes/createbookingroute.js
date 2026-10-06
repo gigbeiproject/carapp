@@ -1,7 +1,7 @@
 // routes/booking.js
 const express = require("express");
 const { protect } = require("../middleware/auth");
-const { createBookingOrder, verifyBookingPayment ,getUserBookings,cancelBooking,getBookingById,selfBookCar } = require("../controllers/createbooking");
+const { createBookingOrder, verifyBookingPayment ,getUserBookings,cancelBooking,getBookingById,selfBookCar, getCarSelfBookings, updateSelfBooking, deleteSelfBooking, requestRefund } = require("../controllers/createbooking");
 
 const router = express.Router();
 
@@ -23,5 +23,12 @@ router.put("/cancel-booking/:reservationId",protect, cancelBooking); // PUT or P
 // host  api this 
 
 router.post("/self-book-car", protect, selfBookCar);
+// Host: manage existing self bookings of their own car
+router.get("/self-bookings/:carId", protect, getCarSelfBookings);
+
+// Unverified customer: cancel + request refund instead of doing KYC
+router.post("/refund-request/:id", protect, requestRefund);
+router.put("/self-book/:id", protect, updateSelfBooking);
+router.delete("/self-book/:id", protect, deleteSelfBooking);
 
 module.exports = router;

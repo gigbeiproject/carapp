@@ -17,6 +17,76 @@ function thresholdInHours(coupon) {
   return coupon.minHours * factor;
 }
 
+/**
+ * Checks a coupon against a booking. `baseAmount` is the booking amount the
+ * coupon's minimum applies to (amount before discount and GST). Returns
+ * { ok: true, coupon, discount } or { ok: false, message }.
+ * Amounts are compared as numbers — MySQL DECIMALs come back as strings.
+ */
+async function validateCouponForBooking({ code, baseAmount, totalHours, userId }) {
+  const [coupons] = await db.execute(
+    "SELECT * FROM coupons WHERE code = ? AND startDate <= NOW() AND endDate >= NOW()",
+    [code]
+  );
+  if (coupons.length === 0) return { ok: false, message: "Coupon not valid or expired" };
+  const coupon = coupons[0];
+
+  const amount = Number(baseAmount);
+  const minAmount = Number(coupon.minAmount || 0);
+  if (!Number.isFinite(amount) || amount < minAmount) {
+    return {
+      ok: false,
+      message: `Coupon ${coupon.code} is valid only on bookings of ₹${minAmount.toLocaleString("en-IN")} or more`,
+    };
+  }
+
+  if (coupon.usageLimit != null) {
+    const [used] = await db.execute(
+      "SELECT COUNT(*) AS usedCount FROM reservations WHERE userId = ? AND couponCode = ? AND status <> 'CANCELLED'",
+      [userId, code]
+    );
+    if (Number(used[0].usedCount) >= Number(coupon.usageLimit)) {
+      return { ok: false, message: "Coupon usage limit reached" };
+    }
+  }
+
+  const value = Number(
+    coupon.minHours && Number(totalHours) < thresholdInHours(coupon) ? coupon.belowMinHoursDiscount : coupon.discountValue
+  ) || 0;
+  let discount = coupon.discountType === "PERCENT" ? (amount * value) / 100 : value;
+  if (coupon.discountType === "PERCENT" && coupon.maxDiscount != null) discount = Math.min(discount, Number(coupon.maxDiscount));
+  discount = Math.min(discount, amount);
+
+  return { ok: true, coupon, discount: Number(discount.toFixed(2)) };
+}
+
+exports.validateCouponForBooking = validateCouponForBooking;
+
+// Amount/percentage sanity rules for a new coupon (also enforced in the
+// admin form). Returns an error message, or null when valid.
+function validateCouponFields(body) {
+  const num = (v) => (v === undefined || v === null || v === "" ? null : Number(v));
+  const value = num(body.discountValue);
+  const minAmount = num(body.minAmount) ?? 0;
+  const maxDiscount = num(body.maxDiscount);
+  const below = num(body.belowMinHoursDiscount);
+  const usageLimit = num(body.usageLimit);
+  const percent = body.discountType === "PERCENT";
+
+  if (!["PERCENT", "FIXED"].includes(body.discountType)) return "discountType must be PERCENT or FIXED";
+  if (!(value > 0)) return "Discount value must be greater than 0";
+  if (percent && value > 100) return "Percentage discount cannot be more than 100%";
+  if (minAmount < 0) return "Minimum booking amount cannot be negative";
+  if (maxDiscount !== null && !(maxDiscount > 0)) return "Max discount must be greater than 0";
+  if (!percent && minAmount > 0 && value >= minAmount) {
+    return `A ₹${value} discount must be less than the minimum booking amount (₹${minAmount})`;
+  }
+  if (below !== null && (below < 0 || (percent && below > 100))) return "Below-threshold discount is out of range";
+  if (usageLimit !== null && !(usageLimit >= 1)) return "Usage limit must be at least 1";
+  if (new Date(body.endDate) <= new Date(body.startDate)) return "End date must be after the start date";
+  return null;
+}
+
 // ✅ Create Coupon (Admin)
 exports.createCoupon = async (req, res) => {
   try {
@@ -46,6 +116,11 @@ exports.createCoupon = async (req, res) => {
         success: false,
         message: "belowMinHoursDiscount is required when minHours is set"
       });
+    }
+
+    const couponError = validateCouponFields(req.body);
+    if (couponError) {
+      return res.status(400).json({ success: false, message: couponError });
     }
 
     await db.execute(
@@ -135,61 +210,15 @@ exports.deleteCoupon = async (req, res) => {
         return res.status(400).json({ success: false, message: "Required fields missing" });
       }
 
-      // 1️⃣ Check coupon validity
-      const [coupons] = await db.execute(
-        `SELECT * FROM coupons
-        WHERE code = ? AND startDate <= NOW() AND endDate >= NOW()`,
-        [couponCode]
-      );
-
-      if (coupons.length === 0) {
-        return res.status(400).json({ success: false, message: "Coupon not valid or expired" });
-      }
-
-      const coupon = coupons[0];
-
-      // 2️⃣ Check minimum booking amount
-      if (bookingAmount < coupon.minAmount) {
-        return res.status(400).json({
-          success: false,
-          message: `Booking amount must be at least ${coupon.minAmount}`
-        });
-      }
-
-      // 3️⃣ Check usage limit for this user
-      const [used] = await db.execute(
-        `SELECT COUNT(*) AS usedCount FROM reservations WHERE userId = ? AND couponCode = ?`,
-        [userId, couponCode]
-      );
-
-      if (used[0].usedCount >= coupon.usageLimit) {
-        return res.status(400).json({ success: false, message: "Coupon usage limit reached" });
-      }
-
-      // 4️⃣ Calculate discount — duration-tiered when the coupon has a
-      // threshold configured: bookings shorter than the threshold (converted
-      // to hours from whatever unit — Hours/Weeks/Months — the coupon was
-      // configured with) use belowMinHoursDiscount instead of discountValue.
-      const applicableDiscountValue =
-        coupon.minHours && Number(totalHours) < thresholdInHours(coupon)
-          ? coupon.belowMinHoursDiscount
-          : coupon.discountValue;
-
-      let discount = 0;
-      if (coupon.discountType === "PERCENT") {
-        discount = (bookingAmount * applicableDiscountValue) / 100;
-        if (coupon.maxDiscount) discount = Math.min(discount, coupon.maxDiscount);
-      } else {
-        discount = applicableDiscountValue;
-      }
+      const result = await validateCouponForBooking({ code: couponCode, baseAmount: bookingAmount, totalHours, userId });
+      if (!result.ok) return res.status(400).json({ success: false, message: result.message });
 
       res.status(200).json({
         success: true,
         message: "Coupon applied successfully",
-        discount: parseFloat(discount.toFixed(2)),
-        finalAmount: parseFloat((bookingAmount - discount).toFixed(2))
+        discount: result.discount,
+        finalAmount: parseFloat((Number(bookingAmount) - result.discount).toFixed(2)),
       });
-
     } catch (err) {
       console.error(err);
       res.status(500).json({ success: false, message: "Internal Server Error", error: err.message });

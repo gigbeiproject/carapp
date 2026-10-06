@@ -61,36 +61,21 @@ const db = require("../../config/db");
       }
 
       // ======================================
-      // CHECK SELF BOOKING FOR EACH CAR
+      // ACTIVE SELF BOOKINGS — one query for all cars (was one per car)
       // ======================================
-      for (let car of cars) {
-
-        // ✅ Default values
-        car.selfBook = false;
-        car.freeAfter = null;
-
-        // ✅ Check active self booking
-        const [selfBooking] = await db.execute(
-          `
-          SELECT 
-            endDate
-          FROM reservations
-          WHERE carId = ?
-          AND status = 'SELFBOOK'
-          AND endDate >= NOW()
-          ORDER BY endDate ASC
-          LIMIT 1
-          `,
-          [car.id]
-        );
-
-        // ✅ If self booked
-        if (selfBooking.length > 0) {
-
-          car.selfBook = true;
-
-          car.freeAfter = selfBooking[0].endDate;
-        }
+      const ids = cars.map((c) => c.id);
+      const [selfBookings] = await db.query(
+        `SELECT carId, MIN(endDate) AS freeAfter
+           FROM reservations
+          WHERE carId IN (${ids.map(() => "?").join(",")})
+            AND status = 'SELFBOOK' AND endDate >= NOW()
+          GROUP BY carId`,
+        ids
+      );
+      const freeAfterByCar = new Map(selfBookings.map((r) => [r.carId, r.freeAfter]));
+      for (const car of cars) {
+        car.freeAfter = freeAfterByCar.get(car.id) ?? null;
+        car.selfBook = car.freeAfter !== null;
       }
 
       console.log("Cars found for user:", userId, cars.length);

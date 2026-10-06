@@ -13,10 +13,11 @@ router.post("/register-device", protect, async (req, res) => {
   const { expoPushToken } = req.body;
   const userId = req.user.id; // ✅ Extracted from protect middleware
 
-  if (!expoPushToken || !expoPushToken.startsWith("ExponentPushToken")) {
+  // Accepts Expo tokens (old RN app) and Firebase/FCM tokens (Flutter app).
+  if (typeof expoPushToken !== "string" || expoPushToken.trim().length < 20) {
     return res
       .status(400)
-      .json({ success: false, message: "Invalid Expo push token" });
+      .json({ success: false, message: "Invalid push token" });
   }
 
   try {
@@ -29,13 +30,11 @@ router.post("/register-device", protect, async (req, res) => {
       )
     `);
 
-    // ✅ Upsert token
+    // ✅ One row per device token: if this device was registered before
+    // (maybe by another account that logged in on it), move it to this user.
+    await db.execute("DELETE FROM user_tokens WHERE expoPushToken = ?", [expoPushToken]);
     await db.execute(
-      `
-      INSERT INTO user_tokens (userId, expoPushToken)
-      VALUES (?, ?)
-      ON DUPLICATE KEY UPDATE expoPushToken = VALUES(expoPushToken)
-    `,
+      "INSERT INTO user_tokens (userId, expoPushToken, updatedAt) VALUES (?, ?, NOW())",
       [userId, expoPushToken]
     );
 

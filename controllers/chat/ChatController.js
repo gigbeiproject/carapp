@@ -1,9 +1,15 @@
 const db = require("../../config/db");
+const { sendPushToUser } = require("../../utils/pushNotification");
 
 // 📩 Send a new message
 exports.sendMessage = async (req, res) => {
   const { receiverId, message } = req.body;
   const senderId = req.user.id;
+
+  // e.g. a host who booked their own car tapping "Contact host"
+  if (!receiverId || String(receiverId) === String(senderId)) {
+    return res.status(400).json({ success: false, message: "You can't send a message to yourself" });
+  }
 
   try {
     // ✅ Find or create conversation
@@ -32,9 +38,19 @@ exports.sendMessage = async (req, res) => {
     );
 
     res.json({ success: true, message: "Message sent successfully", conversationId });
+
+    // 🔔 Notify the receiver (after responding, so chat stays fast)
+    const [senderRows] = await db.query("SELECT name, phoneNumber FROM users WHERE id = ?", [senderId]);
+    const senderName = senderRows[0]?.name || senderRows[0]?.phoneNumber || "Someone";
+    const preview = String(message || "").trim();
+    sendPushToUser(receiverId, {
+      title: `💬 New message from ${senderName}`,
+      body: preview.length > 120 ? `${preview.slice(0, 117)}...` : preview,
+      data: { type: "CHAT_MESSAGE", conversationId, senderId },
+    });
   } catch (err) {
     console.error("Send message error:", err);
-    res.status(500).json({ success: false, error: err.message });
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -85,6 +101,9 @@ exports.startConversation = async (req, res) => {
 
   if (!participantId) {
     return res.status(400).json({ success: false, message: "participantId is required" });
+  }
+  if (String(participantId) === String(senderId)) {
+    return res.status(400).json({ success: false, message: "You can't start a chat with yourself" });
   }
 
   try {

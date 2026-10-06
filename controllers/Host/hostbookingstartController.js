@@ -2,6 +2,7 @@ const db = require("../../config/db");
 const s3 = require("../../config/s3");
 const { v4: uuidv4 } = require("uuid");
 const axios = require("axios");
+const { sendPushToUser } = require("../../utils/pushNotification");
 // ✅ Helper: Upload file to S3
 const uploadToS3 = async (fileBuffer, fileName, folder = "bookings") => {
   const params = {
@@ -10,6 +11,15 @@ const uploadToS3 = async (fileBuffer, fileName, folder = "bookings") => {
     Body: fileBuffer,
   };
   return await s3.upload(params).promise(); // Returns { Location: 'https://...' }
+};
+
+// Older app versions (RN and early Flutter) appended every photo twice —
+// once as "files" and once as "prePhotos"/"dropPhotos" — and upload.any()
+// accepted both, so 6 photos were saved as 12. Use only one field.
+const pickTripPhotos = (files, legacyField) => {
+  const all = files || [];
+  const main = all.filter((f) => f.fieldname === "files");
+  return main.length > 0 ? main : all.filter((f) => f.fieldname === legacyField);
 };
 
 // ✅ Upload pickup photos (start booking)
@@ -24,7 +34,20 @@ const startBooking = async (req, res) => {
       });
     }
 
-    if (!req.files || req.files.length === 0) {
+    // The customer must complete KYC before the trip can start.
+    const [kycRows] = await db.query(
+      `SELECT u.isVerified FROM reservations r JOIN users u ON u.id = r.userId WHERE r.id = ?`,
+      [reservationId]
+    );
+    if (kycRows.length && Number(kycRows[0].isVerified) !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "The customer has not completed verification yet. You can start the trip once they are verified.",
+      });
+    }
+
+    const tripPhotos = pickTripPhotos(req.files, "prePhotos");
+    if (tripPhotos.length === 0) {
       return res.status(400).json({
         success: false,
         message: "No files uploaded",
@@ -64,7 +87,7 @@ const startBooking = async (req, res) => {
     // 3️⃣ Upload pickup photos
     const uploadedPhotos = [];
 
-    for (const file of req.files) {
+    for (const file of tripPhotos) {
       const uploadResult = await uploadToS3(
         file.buffer,
         file.originalname,
@@ -102,58 +125,11 @@ const startBooking = async (req, res) => {
     const customerId = reservation.userId;
     const carTitle = reservation.title;
 
-    const [tokenRows] = await db.query(
-      "SELECT expoPushToken FROM user_tokens WHERE userId = ?",
-      [customerId]
-    );
-
-    if (tokenRows.length > 0 && tokenRows[0].expoPushToken) {
-      const expoPushToken = tokenRows[0].expoPushToken;
-
-      const message = {
-        to: expoPushToken,
-        sound: "default",
-        title: "🚗 Booking Started",
-        body: `Your booking for "${carTitle}" has been started by the host.`,
-        data: {
-          reservationId,
-          carId: reservation.carId,
-          type: "BOOKING_STARTED",
-        },
-      };
-
-      try {
-        const expoResponse = await axios.post(
-          "https://exp.host/--/api/v2/push/send",
-          message,
-          {
-            headers: {
-              Accept: "application/json",
-              "Accept-Encoding": "gzip, deflate",
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        console.log(
-          `✅ Booking start notification sent to customer (${customerId})`
-        );
-        console.log("Expo Response:", expoResponse.data);
-      } catch (notificationError) {
-        console.error(
-          "Notification sending failed:",
-          notificationError.response?.data || notificationError.message
-        );
-      }
-    } else {
-      console.log(
-        `⚠️ No Expo token found for customerId: ${customerId}`
-      );
-    }
-
-    // ==================================================
-    // SUCCESS RESPONSE
-    // ==================================================
+    sendPushToUser(customerId, {
+      title: "🚗 Booking Started",
+      body: `Your trip in "${carTitle}" has started. Have a safe drive!`,
+      data: { type: "BOOKING_STARTED", reservationId, carId: reservation.carId },
+    });
 
     return res.json({
       success: true,
@@ -188,7 +164,8 @@ const completeBooking = async (req, res) => {
     }
 
     // 2️⃣ Validate files
-    if (!req.files || req.files.length === 0) {
+    const tripPhotos = pickTripPhotos(req.files, "dropPhotos");
+    if (tripPhotos.length === 0) {
       return res.status(400).json({
         success: false,
         message: "No files uploaded",
@@ -228,7 +205,7 @@ const completeBooking = async (req, res) => {
     // 4️⃣ Upload drop photos
     const uploadedPhotos = [];
 
-    for (const file of req.files) {
+    for (const file of tripPhotos) {
       const uploadResult = await uploadToS3(
         file.buffer,
         file.originalname,
@@ -266,54 +243,11 @@ const completeBooking = async (req, res) => {
     const customerId = reservation.userId;
     const carTitle = reservation.title;
 
-    const [tokenRows] = await db.query(
-      "SELECT expoPushToken FROM user_tokens WHERE userId = ?",
-      [customerId]
-    );
-
-    if (tokenRows.length > 0 && tokenRows[0].expoPushToken) {
-      const expoPushToken = tokenRows[0].expoPushToken;
-
-      const message = {
-        to: expoPushToken,
-        sound: "default",
-        title: "✅ Booking Completed",
-        body: `Your booking for "${carTitle}" has been completed successfully.`,
-        data: {
-          reservationId,
-          carId: reservation.carId,
-          type: "BOOKING_COMPLETED",
-        },
-      };
-
-      try {
-        const expoResponse = await axios.post(
-          "https://exp.host/--/api/v2/push/send",
-          message,
-          {
-            headers: {
-              Accept: "application/json",
-              "Accept-Encoding": "gzip, deflate",
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        console.log(
-          `✅ Booking completion notification sent to customer (${customerId})`
-        );
-        console.log("Expo Response:", expoResponse.data);
-      } catch (notificationError) {
-        console.error(
-          "Notification sending failed:",
-          notificationError.response?.data || notificationError.message
-        );
-      }
-    } else {
-      console.log(
-        `⚠️ No Expo token found for customerId: ${customerId}`
-      );
-    }
+    sendPushToUser(customerId, {
+      title: "✅ Booking Completed",
+      body: `Your trip in "${carTitle}" has been completed. Thank you for riding with Carlust!`,
+      data: { type: "BOOKING_COMPLETED", reservationId, carId: reservation.carId },
+    });
 
     return res.json({
       success: true,

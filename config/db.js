@@ -23,6 +23,10 @@ const connection = mysql.createPool({
   // Without this, mysql2 defaults to 'local', meaning the same row can
   // read back as a different instant depending on server deployment TZ.
   timezone: "Z",
+  // Keep pooled connections alive so the remote MySQL server doesn't drop
+  // idle ones — otherwise the first query after a quiet period fails.
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
 });
 
 module.exports = connection;

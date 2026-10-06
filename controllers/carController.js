@@ -223,43 +223,55 @@ exports.getAllCars = async (req, res) => {
     );
 
     // =====================================
-    // 4. PARALLEL EXECUTION (SUPER FAST)
+    // 4. DETAILS FOR ALL CARS ON THIS PAGE IN 5 BATCHED QUERIES
     // =====================================
-    // Promise.all aur .map ka use karke loop ki saari queries ek sath trigger hongi
-    const formattedCars = await Promise.all(cars.map(async (car) => {
-      
-      // Ek hi car ki saari details ek sath mangwa rahe hain (Parallel execution)
-      const [
-        [images], 
-        [documents], 
-        [features], 
-        [ratingResult], 
-        [bookingResult], 
-        [selfBooking]
-      ] = await Promise.all([
-        db.execute("SELECT imagePath FROM car_images WHERE carId = ?", [car.id]),
-        db.execute("SELECT type, filePath FROM car_documents WHERE carId = ?", [car.id]),
-        db.execute("SELECT feature FROM car_features WHERE carId = ?", [car.id]),
-        db.execute("SELECT AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId = ?", [car.id]),
-        db.execute("SELECT COUNT(*) AS bookingCount FROM reservations WHERE carId = ?", [car.id]),
-        db.execute("SELECT endDate FROM reservations WHERE carId = ? AND status = 'SELFBOOK' AND endDate >= NOW() ORDER BY endDate ASC LIMIT 1", [car.id])
-      ]);
+    // (Was 6 queries per car — ~60 round-trips to the remote DB for a page
+    // of 10. Car documents are no longer included: the list doesn't need
+    // them and this endpoint is public.)
+    const carIds = cars.map((c) => c.id);
+    const byCar = (rows) => {
+      const map = new Map();
+      for (const r of rows) {
+        if (!map.has(r.carId)) map.set(r.carId, []);
+        map.get(r.carId).push(r);
+      }
+      return map;
+    };
 
-      const avgRatingRaw = ratingResult[0].avgRating;
-      
-      // Object format karke return karo
+    let imagesByCar = new Map(), featuresByCar = new Map();
+    let ratingByCar = new Map(), bookingsByCar = new Map(), selfBookByCar = new Map();
+
+    if (carIds.length > 0) {
+      const ph = carIds.map(() => "?").join(",");
+      const [[images], [features], [ratings], [bookings], [selfBookings]] = await Promise.all([
+        db.query(`SELECT carId, imagePath FROM car_images WHERE carId IN (${ph}) ORDER BY id`, carIds),
+        db.query(`SELECT carId, feature FROM car_features WHERE carId IN (${ph}) ORDER BY id`, carIds),
+        db.query(`SELECT carId, AVG(rating) AS avgRating, COUNT(*) AS totalReviews FROM car_reviews WHERE carId IN (${ph}) GROUP BY carId`, carIds),
+        db.query(`SELECT carId, COUNT(*) AS bookingCount FROM reservations WHERE carId IN (${ph}) GROUP BY carId`, carIds),
+        db.query(`SELECT carId, MIN(endDate) AS freeAfter FROM reservations WHERE carId IN (${ph}) AND status = 'SELFBOOK' AND endDate >= NOW() GROUP BY carId`, carIds),
+      ]);
+      imagesByCar = byCar(images);
+      featuresByCar = byCar(features);
+      ratingByCar = new Map(ratings.map((r) => [r.carId, r]));
+      bookingsByCar = new Map(bookings.map((r) => [r.carId, r.bookingCount]));
+      selfBookByCar = new Map(selfBookings.map((r) => [r.carId, r.freeAfter]));
+    }
+
+    const formattedCars = cars.map((car) => {
+      const rating = ratingByCar.get(car.id);
+      const avgRatingRaw = rating?.avgRating;
+      const freeAfter = selfBookByCar.get(car.id) ?? null;
       return {
         ...car,
-        selfBook: selfBooking.length > 0 ? true : false,
-        freeAfter: selfBooking.length > 0 ? selfBooking[0].endDate : null,
-        images: images.map(img => img.imagePath),
-        documents: documents,
-        features: features.map(f => f.feature),
+        selfBook: freeAfter !== null,
+        freeAfter,
+        images: (imagesByCar.get(car.id) || []).map((img) => img.imagePath),
+        features: (featuresByCar.get(car.id) || []).map((f) => f.feature),
         avgRating: avgRatingRaw ? Number(parseFloat(avgRatingRaw).toFixed(1)) : 0,
-        totalReviews: ratingResult[0].totalReviews || 0,
-        bookingCount: bookingResult[0].bookingCount || 0
+        totalReviews: Number(rating?.totalReviews || 0),
+        bookingCount: Number(bookingsByCar.get(car.id) || 0),
       };
-    }));
+    });
 
     // =====================================
     // 5. SEND FAST PAGINATED RESPONSE
@@ -523,14 +535,24 @@ exports.updateCar = async (req, res) => {
 
     // Check ownership
     const [existing] = await connection.execute(
-      "SELECT id FROM cars WHERE id = ? AND userId = ?",
+      "SELECT id, carApprovalStatus FROM cars WHERE id = ? AND userId = ?",
       [id, userId]
     );
 
     if (existing.length === 0) {
+      await connection.rollback();
       return res.status(403).json({
         success: false,
         message: "Unauthorized or car not found",
+      });
+    }
+
+    // A car waiting for admin review can't be edited until it's reviewed.
+    if (existing[0].carApprovalStatus === "PENDING") {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "This car is pending admin approval. You can edit it once it has been reviewed.",
       });
     }
 
@@ -551,7 +573,8 @@ exports.updateCar = async (req, res) => {
         lat = ?, 
         lng = ?, 
         driverAvailable = ?, 
-        pickupDropAvailable = ?
+        pickupDropAvailable = ?,
+        carApprovalStatus = 'PENDING'
       WHERE id = ?`,
       [
         title,
@@ -588,17 +611,38 @@ exports.updateCar = async (req, res) => {
       }
     }
 
+    // A listing must keep at least one photo.
+    const newImageCount = req.files?.carImages?.length || 0;
+    if (Array.isArray(carData.images) && carData.images.length === 0 && newImageCount === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Please keep at least one car photo.",
+      });
+    }
+
+    // ✅ Remove images the host deleted in the app. The app sends the
+    // already-uploaded URLs it kept in carData.images.
+    if (Array.isArray(carData.images)) {
+      const [currentImages] = await connection.execute(
+        "SELECT id, imagePath FROM car_images WHERE carId = ?",
+        [id]
+      );
+      for (const img of currentImages) {
+        if (!carData.images.includes(img.imagePath)) {
+          await connection.execute("DELETE FROM car_images WHERE id = ?", [img.id]);
+        }
+      }
+    }
+
     // ✅ Add new car images (optional)
     if (req.files && req.files.carImages) {
       for (let file of req.files.carImages) {
-        const upload = await uploadToS3(
-          file.buffer,
-          file.originalname,
-          "car-images"
-        );
+        // uploadToS3(file, folder) takes the multer file and returns the URL
+        const imageUrl = await uploadToS3(file, "car-images");
         await connection.execute(
           `INSERT INTO car_images (carId, imagePath) VALUES (?, ?)`,
-          [id, upload.Location]
+          [id, imageUrl]
         );
       }
     }
@@ -609,14 +653,10 @@ exports.updateCar = async (req, res) => {
       for (let type of docTypes) {
         if (req.files[type]) {
           for (let file of req.files[type]) {
-            const upload = await uploadToS3(
-              file.buffer,
-              file.originalname,
-              "car-documents"
-            );
+            const docUrl = await uploadToS3(file, "car-documents");
             await connection.execute(
               `INSERT INTO car_documents (carId, type, filePath) VALUES (?, ?, ?)`,
-              [id, type, upload.Location]
+              [id, type, docUrl]
             );
           }
         }
@@ -626,7 +666,8 @@ exports.updateCar = async (req, res) => {
     await connection.commit();
     res.json({
       success: true,
-      message: "Car listing updated successfully",
+      message: "Car listing updated and sent to admin for approval",
+      carApprovalStatus: "PENDING",
     });
   } catch (err) {
     await connection.rollback();

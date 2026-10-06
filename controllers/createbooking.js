@@ -4,14 +4,31 @@ const crypto = require("crypto");
 const db = require("../config/db"); // ✅ Add this
 const axios = require("axios");
 const { parsePagination, buildPaginationMeta } = require("../utils/pagination");
+const { sendPushToUser } = require("../utils/pushNotification");
+const { validateCouponForBooking } = require("./couponController");
 
 const createBookingOrder = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { carId, startDate, endDate, amount, totalHours } = req.body;
+    const { carId, startDate, endDate, amount, totalHours, couponCode, couponBaseAmount } = req.body;
 
     if (!carId || !startDate || !endDate || !amount) {
       return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // 👉 Coupon check on the server: minimum booking amount, validity dates
+    // and per-user usage limit (the app used to keep a coupon applied after
+    // the booking amount dropped below its minimum).
+    if (couponCode) {
+      const couponResult = await validateCouponForBooking({
+        code: couponCode,
+        baseAmount: couponBaseAmount,
+        totalHours,
+        userId,
+      });
+      if (!couponResult.ok) {
+        return res.status(400).json({ success: false, message: couponResult.message });
+      }
     }
 
     // 👉 STEP 1: Get user status
@@ -26,30 +43,9 @@ const createBookingOrder = async (req, res) => {
 
     const isVerified = userRows[0].isVerified;
 
-    // 👉 STEP 2: If user is NOT verified, check booking limits
-    if (isVerified === 0) {
-      // Check if user has any previous bookings
-      const [bookingRows] = await db.query(
-        "SELECT status FROM reservations WHERE userId = ? ORDER BY createdAt DESC LIMIT 1",
-        [userId]
-      );
-
-      if (bookingRows.length > 0) {
-        const lastStatus = bookingRows[0].status;
-
-        // ❌ User has previous booking and it's NOT PENDING → BLOCK
-        if (lastStatus !== "PENDING") {
-          return res.status(404).json({
-            success: false,
-            message:
-              "Your account is not verified. You can book only one time. Please verify your account to continue."
-          });
-        }
-
-        // ⚠️ User has old booking but status is PENDING → ALLOW only this time
-      }
-      // ✔ If no old booking → allow first time
-    }
+    // 👉 STEP 2: Unverified users can book too. After booking they are asked
+    // to complete KYC; until then the host's details stay hidden from them
+    // (and theirs from the host), and they can request a refund instead.
 
     // 👉 STEP 3: Create Razorpay Order
     const options = {
@@ -66,11 +62,19 @@ const createBookingOrder = async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      // Public key id of the Razorpay account that created this order, so the
+      // app always opens checkout with the matching key (test vs live).
+      keyId: process.env.RAZORPAY_KEY_ID,
     });
 
   } catch (err) {
     console.error("Error creating Razorpay order:", err);
-    return res.status(500).json({ message: "Internal server error" });
+    // Razorpay errors come as { statusCode, error: { description } } — pass
+    // the reason through instead of a generic message.
+    const reason = err?.error?.description;
+    return res.status(500).json({
+      message: reason ? `Payment gateway error: ${reason}` : "Internal server error",
+    });
   }
 };
 
@@ -164,35 +168,12 @@ const verifyBookingPayment = async (req, res) => {
       ]
     );
 
-    // ✅ Fetch host Expo token
-    const [tokenRows] = await db.query(
-      "SELECT expoPushToken FROM user_tokens WHERE userId = ?",
-      [hostId]
-    );
-
-    if (tokenRows.length > 0) {
-      const expoPushToken = tokenRows[0].expoPushToken;
-
-      // ✅ Send notification to host
-      const message = {
-        to: expoPushToken,
-        sound: "default",
-        title: "🚗 New Booking Received!",
-        body: `Your car "${carTitle}" has been booked successfully.`,
-      };
-
-      await axios.post("https://exp.host/--/api/v2/push/send", message, {
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip, deflate",
-          "Content-Type": "application/json",
-        },
-      });
-
-      console.log(`✅ Push notification sent to host (${hostId})`);
-    } else {
-      console.log(`⚠️ No Expo token found for hostId: ${hostId}`);
-    }
+    // ✅ Notify the host (never fails the booking if the push fails)
+    sendPushToUser(hostId, {
+      title: "🚗 New Booking Received!",
+      body: `Your car "${carTitle}" has been booked. Open the app to see the booking details.`,
+      data: { type: "NEW_BOOKING", reservationId: bookingId, carId },
+    });
 
     return res.json({
       success: true,
@@ -282,7 +263,7 @@ const getUserBookings = async (req, res) => {
           [r.carId]
         );
         r.avgRating = ratingResult[0].avgRating
-          ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+          ? parseFloat(Number(ratingResult[0].avgRating).toFixed(1))
           : 0;
         r.totalReviews = ratingResult[0].totalReviews;
       }
@@ -348,14 +329,15 @@ const getBookingById = async (req, res) => {
           u.drivingLicenseImg AS userDlFront,
           u.drivingLicenseBackImg AS userDlBack,
           u.idProofImg AS userIdFront,
-          u.idProofBackImg AS userIdBack
+          u.idProofBackImg AS userIdBack,
+          u.isVerified AS customerVerified
 
        FROM reservations r
        JOIN cars c ON r.carId = c.id
        JOIN users h ON c.userId = h.id   -- host
        JOIN users u ON r.userId = u.id   -- user
-       WHERE r.id = ? AND r.userId = ?`,
-      [id, userId]
+       WHERE r.id = ? AND (r.userId = ? OR c.userId = ?)`,
+      [id, userId, userId]
     );
 
     if (rows.length === 0) {
@@ -384,7 +366,7 @@ const getBookingById = async (req, res) => {
       [booking.carId]
     );
     booking.avgRating = ratingResult[0].avgRating
-      ? parseFloat(ratingResult[0].avgRating.toFixed(1))
+      ? parseFloat(Number(ratingResult[0].avgRating).toFixed(1))
       : 0;
     booking.totalReviews = ratingResult[0].totalReviews;
 
@@ -404,6 +386,24 @@ const getBookingById = async (req, res) => {
 
     // 6️⃣ Ensure security deposit included
     booking.securityDeposit = booking.securityDeposit || 0;
+
+    // 7️⃣ KYC privacy: until the customer is verified, the customer doesn't
+    // see the host's details and the host doesn't see the customer's.
+    const viewerIsHost = String(booking.hostId) === String(userId) && String(booking.userId) !== String(userId);
+    booking.viewerRole = viewerIsHost ? "host" : "customer";
+    booking.customerVerified = Number(booking.customerVerified) === 1;
+    const [refunds] = await db.query(
+      "SELECT status, reason, adminNote, createdAt, processedAt FROM refund_requests WHERE reservationId = ? LIMIT 1",
+      [id]
+    );
+    booking.refundRequest = refunds[0] || null;
+    if (!booking.customerVerified) {
+      const hide = viewerIsHost
+        ? ["userName", "userPhone", "userEmail", "userProfilePic", "userDlFront", "userDlBack", "userIdFront", "userIdBack", "userLocation", "customAddress", "userLat", "userLong"]
+        : ["hostName", "hostPhone", "hostEmail", "hostProfilePic", "hostDlFront", "hostDlBack", "hostIdFront", "hostIdBack"];
+      hide.forEach((k) => { booking[k] = null; });
+      booking[viewerIsHost ? "customerDetailsHidden" : "hostDetailsHidden"] = true;
+    }
 
     res.status(200).json({ success: true, booking });
   } catch (err) {
@@ -660,6 +660,173 @@ const selfBookCar = async (req, res) => {
 
 
 
-module.exports = { createBookingOrder, verifyBookingPayment, getUserBookings,cancelBooking,getBookingById,selfBookCar };
+
+// =====================================================
+// SELF BOOKING MANAGEMENT (host): list / change dates / remove
+// Only the car owner, and only reservations with status SELFBOOK.
+// =====================================================
+
+// Loads a SELFBOOK reservation owned by the logged-in host, or sends the
+// error response and returns null.
+const findOwnSelfBooking = async (id, userId, res) => {
+  const [rows] = await db.query(
+    `SELECT r.id, r.carId, r.startDate, r.endDate, c.userId AS ownerId
+       FROM reservations r JOIN cars c ON c.id = r.carId
+      WHERE r.id = ? AND r.status = 'SELFBOOK' LIMIT 1`,
+    [id]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ success: false, message: "Self booking not found" });
+    return null;
+  }
+  if (rows[0].ownerId !== userId) {
+    res.status(403).json({ success: false, message: "You can manage self bookings only for your own car" });
+    return null;
+  }
+  return rows[0];
+};
+
+// GET /api/booking/self-bookings/:carId — active (not yet ended) self bookings
+const getCarSelfBookings = async (req, res) => {
+  try {
+    const { carId } = req.params;
+    const [cars] = await db.query("SELECT userId FROM cars WHERE id = ? LIMIT 1", [carId]);
+    if (cars.length === 0) return res.status(404).json({ success: false, message: "Car not found" });
+    if (cars[0].userId !== req.user.id) {
+      return res.status(403).json({ success: false, message: "You can view self bookings only for your own car" });
+    }
+    const [rows] = await db.query(
+      `SELECT id, startDate, endDate FROM reservations
+        WHERE carId = ? AND status = 'SELFBOOK' AND endDate >= NOW()
+        ORDER BY startDate ASC`,
+      [carId]
+    );
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error("Get self bookings error:", err);
+    return res.status(500).json({ success: false, message: "Internal server error", error: err.message });
+  }
+};
+
+// PUT /api/booking/self-book/:id  { startDate, endDate } — change dates/times
+const updateSelfBooking = async (req, res) => {
+  try {
+    const booking = await findOwnSelfBooking(req.params.id, req.user.id, res);
+    if (!booking) return;
+
+    const startDateUtc = new Date(req.body.startDate);
+    const endDateUtc = new Date(req.body.endDate);
+    if (isNaN(startDateUtc.getTime()) || isNaN(endDateUtc.getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid startDate or endDate" });
+    }
+    if (endDateUtc <= startDateUtc) {
+      return res.status(400).json({ success: false, message: "End date must be after the start date" });
+    }
+    if (endDateUtc <= new Date()) {
+      return res.status(400).json({ success: false, message: "End date must be in the future" });
+    }
+
+    // Same overlap rule as selfBookCar, ignoring this booking itself.
+    const [conflicts] = await db.query(
+      `SELECT id FROM reservations
+        WHERE carId = ? AND id <> ?
+          AND status IN ('PENDING','CONFIRMED','START','SELFBOOK')
+          AND ((? BETWEEN startDate AND endDate)
+            OR (? BETWEEN startDate AND endDate)
+            OR (startDate BETWEEN ? AND ?))`,
+      [booking.carId, booking.id, startDateUtc, endDateUtc, startDateUtc, endDateUtc]
+    );
+    if (conflicts.length > 0) {
+      return res.status(400).json({ success: false, message: "Car already booked/self-booked for selected dates" });
+    }
+
+    await db.query(
+      `UPDATE reservations
+          SET startDate = ?, endDate = ?, bookingStartDateTime = ?, bookingEndDateTime = ?, updatedAt = NOW()
+        WHERE id = ?`,
+      [startDateUtc, endDateUtc, startDateUtc, endDateUtc, booking.id]
+    );
+    return res.json({ success: true, message: "Self booking updated successfully" });
+  } catch (err) {
+    console.error("Update self booking error:", err);
+    return res.status(500).json({ success: false, message: "Internal server error", error: err.message });
+  }
+};
+
+// DELETE /api/booking/self-book/:id — remove the block, car is free again.
+// (Deleted rather than CANCELLED: CANCELLED rows show up in the owner's own
+// Trips list, and a self booking is only a date block with no payment.)
+const deleteSelfBooking = async (req, res) => {
+  try {
+    const booking = await findOwnSelfBooking(req.params.id, req.user.id, res);
+    if (!booking) return;
+    await db.query("DELETE FROM reservations WHERE id = ? AND status = 'SELFBOOK'", [booking.id]);
+    return res.json({ success: true, message: "Self booking removed. The car is available again." });
+  } catch (err) {
+    console.error("Delete self booking error:", err);
+    return res.status(500).json({ success: false, message: "Internal server error", error: err.message });
+  }
+};
+
+
+// POST /api/booking/refund-request/:id — an unverified customer who doesn't
+// want to complete KYC cancels the booking and asks for a refund. The admin
+// processes the refund from the admin panel (Refunds page).
+const requestRefund = async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const reason = String(req.body?.reason || "Customer did not want to complete KYC").slice(0, 500);
+
+    const [[user]] = await connection.query("SELECT isVerified FROM users WHERE id = ?", [userId]);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (Number(user.isVerified) === 1) {
+      return res.status(400).json({ success: false, message: "Your account is verified — refund without KYC is only for unverified accounts." });
+    }
+
+    const [[booking]] = await connection.query(
+      `SELECT r.id, r.status, r.amount, r.paymentId, r.hostId, c.title AS carTitle
+         FROM reservations r JOIN cars c ON c.id = r.carId
+        WHERE r.id = ? AND r.userId = ?`,
+      [id, userId]
+    );
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+    if (!["CONFIRMED", "PENDING"].includes(booking.status)) {
+      return res.status(400).json({ success: false, message: "A refund can only be requested before the trip starts." });
+    }
+
+    const [existing] = await connection.query("SELECT status FROM refund_requests WHERE reservationId = ?", [id]);
+    if (existing.length) {
+      return res.status(400).json({ success: false, message: `A refund request already exists (${existing[0].status}).` });
+    }
+
+    await connection.beginTransaction();
+    await connection.query(
+      `INSERT INTO refund_requests (id, reservationId, userId, amount, paymentId, reason, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'PENDING')`,
+      [uuidv4(), id, userId, booking.amount || 0, booking.paymentId || null, reason]
+    );
+    // Cancel the booking so the car is free again for other customers.
+    await connection.query("UPDATE reservations SET status = 'CANCELLED', updatedAt = NOW() WHERE id = ?", [id]);
+    await connection.commit();
+
+    res.json({ success: true, message: "Refund requested. Your booking has been cancelled and the amount will be refunded after review." });
+
+    sendPushToUser(booking.hostId, {
+      title: "❌ Booking Cancelled",
+      body: `The booking for "${booking.carTitle}" was cancelled by the customer.`,
+      data: { type: "BOOKING_CANCELLED", reservationId: id },
+    });
+  } catch (err) {
+    try { await connection.rollback(); } catch { /* not in a transaction */ }
+    console.error("requestRefund error:", err);
+    if (!res.headersSent) res.status(500).json({ success: false, message: "Internal server error", error: err.message });
+  } finally {
+    connection.release();
+  }
+};
+
+module.exports = { createBookingOrder, verifyBookingPayment, getUserBookings,cancelBooking,getBookingById,selfBookCar, getCarSelfBookings, updateSelfBooking, deleteSelfBooking, requestRefund };
 
 
