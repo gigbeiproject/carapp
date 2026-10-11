@@ -218,6 +218,9 @@ exports.getAllCars = async (req, res) => {
       FROM cars c
       JOIN users u ON c.userId = u.id
       WHERE c.carApprovalStatus = 'APPROVED'
+      -- Fixed order so pages never overlap or skip cars while scrolling
+      -- (same as the category API: newest listings first).
+      ORDER BY c.createdAt DESC, c.id
       LIMIT ${limit} OFFSET ${offset}
       `
     );
